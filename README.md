@@ -23,19 +23,24 @@
 - **Multi-Pico config entries** — group several identical Picos (e.g.
   multiple stairway remotes) under one shared, editable configuration
   instead of configuring each one separately.
-- **P2B/2B dual-light mode** — the ON and OFF buttons can switch between two
-  separate lights (e.g. a center fixture and an edge/ring accent light) at a
-  configured color, white temperature, effect, and brightness, instead of
-  just turning one light on and off. The effect and white-temperature
-  choices are picked from what the selected accent light actually supports,
-  not typed in, and repeated OFF taps can cycle through several saved
-  presets. See [P2B and 2B dual-light mode](#p2b-and-2b-dual-light-mode).
+- **Dual-light mode (P2B, 2B, 3BRL)** — the ON and OFF buttons can switch
+  between two separate lights (e.g. a center fixture and an edge/ring accent
+  light) at a configured color, white temperature, effect, and brightness,
+  instead of just turning one light on and off. The effect and
+  white-temperature choices are picked from what the selected accent light
+  actually supports, not typed in, and repeated OFF taps can cycle through
+  several saved presets, each previewable live while you configure it. See
+  [Dual-light mode](#dual-light-mode).
 - **Light on/off toggle option** — ON and OFF can each independently toggle
   a light's state instead of always issuing a discrete turn-on/turn-off.
-- **3BRL hold actions** — ON, OFF, and STOP can each run a custom action
-  sequence when held, in addition to their normal tap behavior (e.g. a tap
-  turns on one light, a hold turns on the whole room). See
-  [3BRL hold actions](#3brl-hold-actions).
+- **3BRL hold and double-tap actions** — ON, OFF, and STOP can each run a
+  custom action sequence when held (in addition to their normal tap
+  behavior) or on two quick taps (instead of it) — a button can use one or
+  the other. See [3BRL custom actions](#3brl-custom-actions).
+- **A `pico_link_button` event** for every mapped press/release, so
+  automations (or a tool like Node-RED) can react to a Pico's normalized
+  button/domain without re-deriving it from the raw Lutron event. See
+  [The pico_link_button event](#the-pico_link_button-event).
 - **Custom actions run through Home Assistant's real script engine** — STOP
   buttons and 4B scene buttons support the same conditions, if-then, choose,
   repeat, and templating available in the automation editor's action picker,
@@ -194,9 +199,9 @@ only Picos of this entry's type that aren't claimed by another entry are
 offered, and at least one must remain. Non-4B entries then get the same
 entity picker used during setup (you can even switch which domain it
 controls here), followed by the timing and domain-specific
-[options](#options), and for `3BRL` Picos, the STOP and hold actions
-builder — none of which the initial add flow asks about, since the defaults
-just work.
+[options](#options), and for `3BRL` Picos, the custom actions builder —
+none of which the initial add flow asks about, since the defaults just
+work.
 4B entries get the same button-action editor used during setup. Changes take
 effect immediately and apply to every Pico in the entry; Pico Link
 automatically reloads them all.
@@ -281,19 +286,42 @@ Each entry in `accent_light_presets` has its own:
 | OFF tap  | Turn off (or toggle if `light_on_off_toggle`) |
 | OFF hold | Ramp brightness downward  |
 
-#### P2B and 2B dual-light mode
+#### 3BRL
+
+| Button | Tap                                         | Hold / double-tap (pick one, see below) |
+| ------ | -------------------------------------------- | ------------- |
+| ON     | Turn on at `light_on_pct` (or toggle if `light_on_off_toggle`) | Custom `on_hold` actions on hold, or `on_double_tap` actions on a second quick tap |
+| OFF    | Turn off (or toggle if `light_on_off_toggle`) | Custom `off_hold` or `off_double_tap` actions |
+| RAISE  | Increase by `light_step_pct`                | Ramp upward (no hold/double-tap actions apply here) |
+| LOWER  | Decrease by `light_step_pct`                | Ramp downward (no hold/double-tap actions apply here) |
+| STOP   | Custom STOP actions, otherwise no action    | Custom `stop_hold` or `stop_double_tap` actions |
+
+Brightness does not ramp below `light_low_pct`. See
+[3BRL custom actions](#3brl-custom-actions) for how hold and double-tap
+actions work.
+
+#### Dual-light mode
 
 Configuring `accent_lights` (on the "Accent light" options step, shown only
-for a P2B/2B assigned to the light domain) puts it into dual-light mode.
-Instead of turning the same light on and off, ON and OFF switch between two
-separate lights — for example a center fixture and a ring/edge accent light:
+for a P2B, 2B, or 3BRL assigned to the light domain) puts it into dual-light
+mode. Instead of turning the same light on and off, ON and OFF switch
+between two separate lights — for example a center fixture and a ring/edge
+accent light:
 
-| Gesture  | Action                                                           |
-| -------- | ----------------------------------------------------------------- |
-| ON tap   | Turn on `lights` at `light_on_pct`; turn off `accent_lights`       |
-| ON hold  | Ramp `lights` brightness upward; turns off `accent_lights` once the hold threshold is crossed |
-| OFF tap  | Turn on `accent_lights` at the current preset; turn off `lights`. A second OFF tap while the accent light is already on advances to the next preset instead of switching anything off |
-| OFF hold | Ramp `lights` brightness downward; once it bottoms out at `light_low_pct`, switches to `accent_lights` at the current preset instead of just stopping |
+| Gesture  | P2B / 2B                                                         | 3BRL |
+| -------- | ----------------------------------------------------------------- | ---- |
+| ON tap   | Turn on `lights` at `light_on_pct`; turn off `accent_lights`       | Same |
+| ON hold  | Ramp `lights` brightness upward; turns off `accent_lights` once the hold threshold is crossed | Not applicable — RAISE/LOWER ramp `lights` instead |
+| OFF tap  | Turn on `accent_lights` at the current preset; turn off `lights`. A second OFF tap while the accent light is already on advances to the next preset instead of switching anything off | Same |
+| OFF hold | Ramp `lights` brightness downward; once it bottoms out at `light_low_pct`, switches to `accent_lights` at the current preset instead of just stopping | Not applicable |
+
+For a 3BRL, RAISE and LOWER always ramp `lights` regardless of dual-light
+mode; ON and OFF only ever tap (they have no hold behavior of their own to
+begin with — see the 3BRL table above), so they simply select center or
+accent immediately. A 3BRL's ON/OFF can still separately use
+`on_hold`/`off_hold`/`on_double_tap`/`off_double_tap` alongside dual-light
+mode — those actions run in addition to (hold) or instead of (double-tap)
+the center/accent switch, exactly as they would outside dual-light mode.
 
 `accent_lights` and `lights` are never on at the same time. `light_on_off_toggle`
 is ignored in this mode, since ON and OFF already mean "select center" and
@@ -314,23 +342,16 @@ since the available choices depend on what that light supports:
 - **Color** — a plain RGB color, used when neither an effect nor white
   temperature is selected.
 
+Checking **Try it** on that step turns the accent light(s) on right away
+with whatever's currently filled in, so you can see a preset before
+continuing — it re-shows the same step afterward with your values kept, and
+doesn't count as finishing the preset.
+
 Checking "Add another preset" on that step repeats it to build a list
 (`accent_light_presets`, up to 5). With only one preset, OFF always shows
 the same appearance, exactly as if presets didn't exist. With more than
 one, ON always resets back to the first preset — only repeated OFF taps
 advance through the list, wrapping back to the first after the last.
-
-#### 3BRL
-
-| Button | Tap                                         | Hold          |
-| ------ | -------------------------------------------- | ------------- |
-| ON     | Turn on at `light_on_pct` (or toggle if `light_on_off_toggle`) | Custom `on_hold` actions, if configured |
-| OFF    | Turn off (or toggle if `light_on_off_toggle`) | Custom `off_hold` actions, if configured |
-| RAISE  | Increase by `light_step_pct`                | Ramp upward   |
-| LOWER  | Decrease by `light_step_pct`                | Ramp downward |
-| STOP   | Custom STOP actions, otherwise no action    | Custom `stop_hold` actions, if configured |
-
-Brightness does not ramp below `light_low_pct`.
 
 Rapid repeated brightness taps use the most recently requested brightness for a
 short period instead of waiting for Home Assistant state to update.
@@ -365,8 +386,9 @@ either button to work correctly regardless of which state it's currently in
 
 Fan controls are always tap-only. Holding ON, OFF, RAISE, or LOWER does not
 initiate a ramp. A 3BRL fan Pico can still use
-`on_hold`/`off_hold`/`stop_hold` to run custom actions when ON, OFF, or STOP
-is held; see [3BRL hold actions](#3brl-hold-actions).
+`on_hold`/`off_hold`/`stop_hold` or `on_double_tap`/`off_double_tap`/
+`stop_double_tap` to run custom actions on a hold or a double-tap; see
+[3BRL custom actions](#3brl-custom-actions).
 
 | Button | Action                                              |
 | ------ | ---------------------------------------------------- |
@@ -459,8 +481,9 @@ Volume commands are clamped between `0.0` and `1.0`.
 
 Switches have no domain-specific hold behavior — holding ON, OFF, RAISE, or
 LOWER does nothing extra by itself. A 3BRL switch Pico can still use
-`on_hold`/`off_hold`/`stop_hold` to run custom actions when ON, OFF, or STOP
-is held; see [3BRL hold actions](#3brl-hold-actions).
+`on_hold`/`off_hold`/`stop_hold` or `on_double_tap`/`off_double_tap`/
+`stop_double_tap` to run custom actions on a hold or a double-tap; see
+[3BRL custom actions](#3brl-custom-actions).
 
 ---
 
@@ -487,7 +510,7 @@ next one begins.
 ## STOP Actions and Domain Defaults
 
 Custom STOP actions (`middle_button`) are valid only for `3BRL` Picos,
-configured on the **STOP and hold actions** step.
+configured on the **Custom actions** step.
 
 Resolution order:
 
@@ -506,17 +529,31 @@ Resolution order:
 
 To use the domain default, leave STOP actions empty on that step.
 
-### 3BRL hold actions
+### 3BRL custom actions
 
-`on_hold`, `off_hold`, and `stop_hold` — also configured on the **STOP and
-hold actions** step — let ON, OFF, and STOP each additionally run a custom
-action sequence when held past `hold_time_ms`. These are independent of
-each button's normal tap/press behavior (including custom STOP actions),
-which always still runs immediately on press, unchanged. Leave any of them
-empty to skip; with nothing configured, no timer is created and there's no
-behavior change from holding that button. This is how you can, for example,
-have ON turn on one light on a tap but a whole room on a hold, or have OFF
-switch to a night-light scene on a hold instead of doing nothing.
+On the **Custom actions** step, ON, OFF, and STOP can each additionally run
+a custom action sequence — either on a hold, or on a double tap, but not
+both on the same button (configuring both is rejected the same way any
+other invalid configuration is, showing as **Setup failed** until fixed).
+Leave a button's fields empty to skip it entirely; with nothing configured,
+no timer is created and there's no behavior change at all.
+
+- **Hold** (`on_hold` / `off_hold` / `stop_hold`) — runs once that button
+  has been held past `hold_time_ms`, in addition to its normal tap/press
+  behavior (including custom STOP actions), which always still fires
+  immediately on press, unchanged. This is how you can, for example, have
+  ON turn on one light on a tap but a whole room on a hold.
+- **Double tap** (`on_double_tap` / `off_double_tap` / `stop_double_tap`) —
+  runs instead of that button's normal tap/press behavior when two taps
+  land within `DOUBLE_TAP_WINDOW_MS` (400ms, not configurable) of each
+  other. Configuring this changes that button's timing: since Pico Link
+  can't know a second tap won't follow until the window passes, that
+  button's own normal action is delayed by up to 400ms so it can be
+  replaced by the double-tap action if one comes. Buttons without a
+  double-tap action configured are completely unaffected — this delay
+  only ever applies to a button you've explicitly set one up for. This is
+  how you can, for example, have OFF turn off one light on a tap but a
+  whole room on a double tap.
 
 ---
 
@@ -642,6 +679,42 @@ for each Pico in it, its device ID, configured type, and controlled domain
 — useful for your own troubleshooting or for filing a sharper bug report.
 Nothing in it needs redacting: no credentials or personal data, just entity
 IDs, device IDs, and configuration values.
+
+---
+
+## The pico_link_button event
+
+Pico Link fires a `pico_link_button` event on the bus for every press and
+release that passes device, hardware-type, and button validation —
+regardless of what (if anything) it goes on to control. This lets an
+automation, a Node-RED flow, or anything else listening on the event bus
+react to a Pico's normalized semantics directly, without re-deriving them
+from the raw `lutron_caseta_button_event` (device ID → configured type →
+normalized button name).
+
+Event data:
+
+| Field       | Description                                                    |
+| ----------- | ---------------------------------------------------------------- |
+| `device_id` | The Pico's Home Assistant device ID                            |
+| `type`      | Configured Pico type (`P2B`, `2B`, `3BRL`, or `4B`)             |
+| `button`    | Normalized button name (`on`, `off`, `stop`, `raise`, `lower`, `button_1`, `button_2`, `button_3`) |
+| `action`    | `press` or `release`                                            |
+| `domain`    | The domain this Pico controls (`light`, `cover`, `fan`, `media_player`, `switch`), or `null` for a 4B Pico |
+
+This fires alongside — not instead of — Pico Link's own configured
+behavior; it's an additional hook, not a replacement for `middle_button`,
+`on_hold`, or any other configured action. Example automation trigger:
+
+```yaml
+trigger:
+  - platform: event
+    event_type: pico_link_button
+    event_data:
+      device_id: <your Pico's device ID>
+      button: "on"
+      action: press
+```
 
 ---
 

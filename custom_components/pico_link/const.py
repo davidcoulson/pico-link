@@ -30,6 +30,20 @@ PICO_TYPE_MAP = {
 
 ON_OFF_PICO_TYPES = frozenset({"P2B", "2B"})
 
+# Pico types that can be put into dual-light (accent light) mode.
+ACCENT_LIGHT_PICO_TYPES = frozenset({"P2B", "2B", "3BRL"})
+
+# Event fired on the bus for every mapped, in-scope button press/release,
+# after device/type/button validation, regardless of what (if anything)
+# it goes on to control. Lets automations react to a Pico's normalized
+# semantics without re-deriving them from the raw Lutron event.
+PICO_BUTTON_EVENT = f"{DOMAIN}_button"
+
+# Max gap between two taps of the same 3BRL button to count as a
+# double tap, in milliseconds. Only buttons with a configured
+# *_double_tap action wait this long before resolving a tap.
+DOUBLE_TAP_WINDOW_MS = 400
+
 # --------------------------------------------------------------------
 # BUTTONS EMITTED BY LUTRON CASETA
 # (These are the normalized forms used throughout the controller.)

@@ -16,7 +16,13 @@ from .actions.light import LightActions
 from .actions.media_player import MediaPlayerActions
 from .actions.switch import SwitchActions
 from .config import PicoConfig
-from .const import DOMAIN, PICO_EVENT_TYPE, PICO_TYPE_MAP, SUPPORTED_BUTTONS
+from .const import (
+    DOMAIN,
+    PICO_BUTTON_EVENT,
+    PICO_EVENT_TYPE,
+    PICO_TYPE_MAP,
+    SUPPORTED_BUTTONS,
+)
 
 # Profiles
 from .profiles.base import PicoProfile
@@ -174,6 +180,17 @@ class PicoController:
 
             if button is None or action is None or button not in SUPPORTED_BUTTONS:
                 return
+
+            self.hass.bus.async_fire(
+                PICO_BUTTON_EVENT,
+                {
+                    "device_id": self.conf.device_id,
+                    "type": self.conf.type,
+                    "button": button,
+                    "action": action,
+                    "domain": self.utils.entity_domain(),
+                },
+            )
 
             try:
                 if action == "press":

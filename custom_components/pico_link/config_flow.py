@@ -11,9 +11,9 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import selector
 
 from .const import (
+    ACCENT_LIGHT_PICO_TYPES,
     DOMAIN,
     DOMAIN_ENTITY_FIELDS,
-    ON_OFF_PICO_TYPES,
     PICO_TYPE_MAP,
     SCENE_BUTTONS,
 )
@@ -257,7 +257,7 @@ def _options_schema(
 def _accent_lights_schema(
     current: dict[str, Any] | None = None,
 ) -> vol.Schema:
-    """P2B/2B only: the accent light entities for dual-light mode."""
+    """P2B/2B/3BRL only: the accent light entities for dual-light mode."""
     current = current or {}
 
     return vol.Schema(
@@ -280,6 +280,36 @@ _ACCENT_COLOR_MODE_RGB = "rgb"
 _ACCENT_COLOR_MODE_TEMP = "color_temp"
 
 
+def _accent_preview_service_data(user_input: dict[str, Any]) -> dict[str, Any]:
+    """
+    Build a light.turn_on payload for previewing an in-progress preset.
+
+    Mirrors LightActions._accent_light_data()'s effect > color_temp >
+    rgb_color precedence, but works directly off the raw form values
+    since nothing has been normalized into a PicoConfig yet.
+    """
+    data: dict[str, Any] = {
+        "brightness_pct": user_input.get("accent_light_brightness_pct", 100),
+    }
+
+    effect = user_input.get("accent_light_effect", "")
+
+    if effect:
+        data["effect"] = effect
+    elif user_input.get("accent_light_color_mode") == _ACCENT_COLOR_MODE_TEMP:
+        data["color_temp_kelvin"] = user_input.get(
+            "accent_light_color_temp_kelvin",
+            2700,
+        )
+    else:
+        data["rgb_color"] = user_input.get(
+            "accent_light_rgb_color",
+            [255, 255, 255],
+        )
+
+    return data
+
+
 def _accent_light_appearance_schema(
     current: dict[str, Any] | None = None,
     *,
@@ -288,7 +318,7 @@ def _accent_light_appearance_schema(
     color_temp_range: tuple[int, int] | None = None,
     offer_add_another: bool = False,
 ) -> vol.Schema:
-    """P2B/2B only: one accent-light preset's color, effect, and brightness."""
+    """P2B/2B/3BRL only: one accent-light preset's color, effect, and brightness."""
     current = current or {}
     effect_options = effect_options or []
 
@@ -394,6 +424,13 @@ def _accent_light_appearance_schema(
         )
     ] = _percent(1, 100)
 
+    fields[
+        vol.Optional(
+            "preview_this_preset",
+            default=False,
+        )
+    ] = selector.BooleanSelector()
+
     if offer_add_another:
         fields[
             vol.Optional(
@@ -405,10 +442,16 @@ def _accent_light_appearance_schema(
     return vol.Schema(fields)
 
 
-def _hold_actions_schema(
+def _custom_actions_schema(
     current: dict[str, Any] | None = None,
 ) -> vol.Schema:
-    """3BRL only: the STOP-tap action, plus ON/OFF/STOP hold actions."""
+    """
+    3BRL only: the STOP-tap action, plus ON/OFF/STOP hold and double-tap actions.
+
+    A button's hold and double-tap fields are mutually exclusive (see
+    PicoConfig.validate()); the UI doesn't enforce that itself, so
+    filling in both surfaces as a "Setup failed" error on submit.
+    """
     current = current or {}
 
     return vol.Schema(
@@ -428,6 +471,18 @@ def _hold_actions_schema(
             vol.Optional(
                 "stop_hold",
                 default=list(current.get("stop_hold", [])),
+            ): selector.ActionSelector(),
+            vol.Optional(
+                "on_double_tap",
+                default=list(current.get("on_double_tap", [])),
+            ): selector.ActionSelector(),
+            vol.Optional(
+                "off_double_tap",
+                default=list(current.get("off_double_tap", [])),
+            ): selector.ActionSelector(),
+            vol.Optional(
+                "stop_double_tap",
+                default=list(current.get("stop_double_tap", [])),
             ): selector.ActionSelector(),
         }
     )
@@ -706,6 +761,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         self._domain: str = ""
         self._options: dict[str, Any] = dict(config_entry.options)
         self._accent_presets: list[dict[str, Any]] = []
+        self._preview_prefill: dict[str, Any] | None = None
 
     async def async_step_init(
         self,
@@ -828,11 +884,11 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             self._options.update(user_input)
 
-            if self._type in ON_OFF_PICO_TYPES and self._domain == "light":
+            if self._type in ACCENT_LIGHT_PICO_TYPES and self._domain == "light":
                 return await self.async_step_accent_light()
 
             if self._type == "3BRL":
-                return await self.async_step_hold_actions()
+                return await self.async_step_custom_actions()
 
             return self._async_finish()
 
@@ -849,7 +905,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
-        """Pick the accent light entities for P2B/2B dual-light mode."""
+        """Pick the accent light entities for dual-light mode."""
         if user_input is not None:
             self._options["accent_lights"] = user_input.get("accent_lights", [])
             return await self.async_step_accent_light_appearance()
@@ -870,9 +926,18 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         available effect and white-temperature choices depend on which
         light(s) were just selected there. Checking "add another preset"
         repeats this step to build accent_light_presets, which the
-        accent light cycles through on repeated OFF taps.
+        accent light cycles through on repeated OFF taps. Checking
+        "Try it" turns the accent light(s) on with whatever's currently
+        filled in and re-shows this same step, so a preset can be
+        checked by eye before moving on.
         """
         if user_input is not None:
+            if user_input.pop("preview_this_preset", False):
+                await self._preview_accent_preset(user_input)
+                self._preview_prefill = user_input
+                return await self.async_step_accent_light_appearance()
+
+            self._preview_prefill = None
             add_another = user_input.pop("add_another_preset", False)
             self._accent_presets.append(user_input)
 
@@ -880,6 +945,10 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_accent_light_appearance()
 
             self._options["accent_light_presets"] = self._accent_presets
+
+            if self._type == "3BRL":
+                return await self.async_step_custom_actions()
+
             return self._async_finish()
 
         color_temp_range = self._accent_light_color_temp_range()
@@ -888,7 +957,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="accent_light_appearance",
             data_schema=_accent_light_appearance_schema(
-                current=self._current_accent_preset_default(),
+                current=self._preview_prefill or self._current_accent_preset_default(),
                 effect_options=self._accent_light_effect_options(),
                 supports_color_temp=color_temp_range is not None,
                 color_temp_range=color_temp_range,
@@ -903,6 +972,23 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         index = len(self._accent_presets)
 
         return existing[index] if index < len(existing) else {}
+
+    async def _preview_accent_preset(self, user_input: dict[str, Any]) -> None:
+        """Turn on the accent light(s) with an in-progress preset, for a live look."""
+        accent_lights = self._options.get("accent_lights") or []
+
+        if not accent_lights:
+            return
+
+        await self.hass.services.async_call(
+            "light",
+            "turn_on",
+            {
+                **_accent_preview_service_data(user_input),
+                "entity_id": accent_lights,
+            },
+            blocking=False,
+        )
 
     def _accent_light_effect_options(self) -> list[str]:
         """Return the effect names supported by the first accent light."""
@@ -959,21 +1045,28 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
         return (int(min_kelvin), int(max_kelvin))
 
-    async def async_step_hold_actions(
+    async def async_step_custom_actions(
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
-        """3BRL only: the STOP-tap action, plus ON/OFF/STOP hold actions."""
+        """3BRL only: the STOP-tap action, plus ON/OFF/STOP hold and double-tap actions."""
         if user_input is not None:
-            self._options["middle_button"] = user_input.get("middle_button", [])
-            self._options["on_hold"] = user_input.get("on_hold", [])
-            self._options["off_hold"] = user_input.get("off_hold", [])
-            self._options["stop_hold"] = user_input.get("stop_hold", [])
+            for field_name in (
+                "middle_button",
+                "on_hold",
+                "off_hold",
+                "stop_hold",
+                "on_double_tap",
+                "off_double_tap",
+                "stop_double_tap",
+            ):
+                self._options[field_name] = user_input.get(field_name, [])
+
             return self._async_finish()
 
         return self.async_show_form(
-            step_id="hold_actions",
-            data_schema=_hold_actions_schema(current=self._options),
+            step_id="custom_actions",
+            data_schema=_custom_actions_schema(current=self._options),
         )
 
     async def async_step_buttons(

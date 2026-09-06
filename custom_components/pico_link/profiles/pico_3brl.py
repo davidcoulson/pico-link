@@ -4,6 +4,8 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
+from ..const import DOUBLE_TAP_WINDOW_MS
+
 if TYPE_CHECKING:
     from ..controller import PicoController
 
@@ -12,19 +14,43 @@ _LOGGER = logging.getLogger(__name__)
 
 class Pico3ButtonRaiseLower:
     """
-    ON, OFF, and STOP each support an optional hold action in addition
-    to their normal tap/press behavior. The domain's press behavior
-    always still runs immediately on press, unchanged; if that
-    button's on_hold/off_hold/stop_hold is configured and the button
-    is still held once hold_time_ms elapses, that action sequence also
-    runs. With nothing configured for a button, no timer is created at
-    all, so unconfigured Picos are unaffected.
+    ON, OFF, and STOP each support an optional hold action, or an
+    optional double-tap action, in addition to their normal tap/press
+    behavior (a button cannot define both — see PicoConfig.validate()).
+
+    Hold: the domain's press behavior always still runs immediately on
+    press, unchanged; if that button's on_hold/off_hold/stop_hold is
+    configured and the button is still held once hold_time_ms elapses,
+    that action sequence also runs.
+
+    Double tap: when a button's on_double_tap/off_double_tap/
+    stop_double_tap is configured, its tap no longer fires on press.
+    Instead, each release waits up to DOUBLE_TAP_WINDOW_MS to see
+    whether a second tap follows: if one does, the double-tap actions
+    run instead; otherwise the normal press behavior runs once the
+    window elapses.
+
+    With nothing configured for a button, no timer is created at all
+    and its tap fires immediately on press exactly as before, so
+    unconfigured Picos are unaffected.
     """
 
     _HOLD_ACTION_FIELDS = {
         "on": "on_hold",
         "off": "off_hold",
         "stop": "stop_hold",
+    }
+
+    _DOUBLE_TAP_ACTION_FIELDS = {
+        "on": "on_double_tap",
+        "off": "off_double_tap",
+        "stop": "stop_double_tap",
+    }
+
+    _TAP_METHODS = {
+        "on": "press_on",
+        "off": "press_off",
+        "stop": "press_stop",
     }
 
     def __init__(self, controller: "PicoController") -> None:
@@ -34,6 +60,11 @@ class Pico3ButtonRaiseLower:
         self._hold_button: Optional[str] = None
         self._hold_task: Optional[asyncio.Task[Any]] = None
         self._hold_generation = 0
+
+        # Double-tap detection, tracked per button so a tap on one
+        # button never affects a pending tap on a different one.
+        self._pending_tap_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._pending_tap_generations: dict[str, int] = {}
 
     def _actions(self):
         domain = self._ctrl.utils.entity_domain()
@@ -48,6 +79,9 @@ class Pico3ButtonRaiseLower:
 
         return actions
 
+    def _double_tap_actions(self, button: str) -> list[dict[str, Any]]:
+        return getattr(self._ctrl.conf, self._DOUBLE_TAP_ACTION_FIELDS[button])
+
     # -------------------------------------------------------------
     # PRESS
     # -------------------------------------------------------------
@@ -57,14 +91,13 @@ class Pico3ButtonRaiseLower:
             return
 
         match button:
-            case "on":
-                actions.press_on()
-                self._arm_hold(button)
-            case "off":
-                actions.press_off()
-                self._arm_hold(button)
-            case "stop":
-                actions.press_stop()
+            case "on" | "off" | "stop":
+                if self._double_tap_actions(button):
+                    # Resolved entirely on release, once we know
+                    # whether a second tap follows.
+                    return
+
+                getattr(actions, self._TAP_METHODS[button])()
                 self._arm_hold(button)
             case "raise":
                 actions.press_raise()
@@ -87,7 +120,10 @@ class Pico3ButtonRaiseLower:
             case "lower":
                 actions.release_lower()
             case "on" | "off" | "stop":
-                self._cancel_hold(button)
+                if self._double_tap_actions(button):
+                    self._resolve_tap_or_double_tap(button, actions)
+                else:
+                    self._cancel_hold(button)
             case _:
                 pass
 
@@ -149,3 +185,69 @@ class Pico3ButtonRaiseLower:
         except asyncio.CancelledError:
             # Expected when released before the hold threshold.
             pass
+
+    # -------------------------------------------------------------
+    # ON / OFF / STOP DOUBLE-TAP ACTIONS
+    # -------------------------------------------------------------
+
+    def _resolve_tap_or_double_tap(self, button: str, actions: Any) -> None:
+        """Complete a tap on a button with double-tap actions configured."""
+        if button in self._pending_tap_tasks:
+            # A tap was already pending for this button: this release
+            # completes a double tap instead of a plain second tap.
+            self._cancel_pending_tap(button)
+
+            double_tap_actions = self._double_tap_actions(button)
+
+            self._ctrl.create_task(
+                self._ctrl.utils.execute_button_action(
+                    double_tap_actions,
+                    name=f"pico_link_{button}_double_tap",
+                ),
+                f"3brl-{button}-double-tap",
+            )
+            return
+
+        generation = self._pending_tap_generations.get(button, 0) + 1
+        self._pending_tap_generations[button] = generation
+
+        self._pending_tap_tasks[button] = self._ctrl.create_task(
+            self._fire_single_tap_after_window(
+                button,
+                actions,
+                generation,
+            ),
+            f"3brl-{button}-tap-window",
+        )
+
+    async def _fire_single_tap_after_window(
+        self,
+        button: str,
+        actions: Any,
+        generation: int,
+    ) -> None:
+        """Fire the plain tap once the double-tap window elapses unmatched."""
+        try:
+            await asyncio.sleep(DOUBLE_TAP_WINDOW_MS / 1000)
+
+            if self._pending_tap_generations.get(button) != generation:
+                return
+
+            self._pending_tap_tasks.pop(button, None)
+            getattr(actions, self._TAP_METHODS[button])()
+        except asyncio.CancelledError:
+            # Expected when a second tap arrives within the window.
+            pass
+
+    def _cancel_pending_tap(self, button: str) -> None:
+        # Bump the generation too, not just cancel the task: this
+        # invalidates the pending coroutine's captured generation even
+        # if cancellation loses the race with its sleep completing.
+        self._pending_tap_generations[button] = (
+            self._pending_tap_generations.get(button, 0) + 1
+        )
+
+        task = self._pending_tap_tasks.pop(button, None)
+
+        if task and not task.done():
+            task.cancel()

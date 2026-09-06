@@ -81,31 +81,35 @@
       },
       "accent_light": {
         "title": "Accent light",
-        "description": "Optional (P2B and 2B only): pick an accent light (e.g. a ring or edge light) to enable dual-light mode. ON switches to the Lights configured above; OFF switches to this accent light. The two are never on at the same time. Leave empty to disable dual-light mode.",
+        "description": "Optional (P2B, 2B, and 3BRL only): pick an accent light (e.g. a ring or edge light) to enable dual-light mode. ON switches to the Lights configured above; OFF switches to this accent light. The two are never on at the same time. Leave empty to disable dual-light mode.",
         "data": {
           "accent_lights": "Accent lights"
         }
       },
       "accent_light_appearance": {
         "title": "Accent light appearance (preset {preset_number})",
-        "description": "Choose what the accent light looks like for this preset. Effect and white-temperature choices are read from the first accent light selected; pick 'No effect' to use the color (or white temperature) instead. Check 'Add another preset' to configure a further appearance — repeated OFF taps while the accent light is already on cycle through every preset you add, in order.",
+        "description": "Choose what the accent light looks like for this preset. Effect and white-temperature choices are read from the first accent light selected; pick 'No effect' to use the color (or white temperature) instead. Check 'Try it' to turn the accent light(s) on with what's filled in now, without leaving this step. Check 'Add another preset' to configure a further appearance — repeated OFF taps while the accent light is already on cycle through every preset you add, in order.",
         "data": {
           "accent_light_rgb_color": "Accent light color",
           "accent_light_color_mode": "Accent light color mode",
           "accent_light_color_temp_kelvin": "Accent light white temperature",
           "accent_light_effect": "Accent light effect",
           "accent_light_brightness_pct": "Accent light brightness",
+          "preview_this_preset": "Try it",
           "add_another_preset": "Add another preset"
         }
       },
-      "hold_actions": {
-        "title": "STOP and hold actions",
-        "description": "All optional. 'STOP actions' run on every STOP tap, replacing the default STOP behavior for this domain. The hold actions run in addition to the normal press behavior when ON, OFF, or STOP is held past the hold time — leave any of them empty to skip.",
+      "custom_actions": {
+        "title": "Custom actions",
+        "description": "All optional. 'STOP actions' run on every STOP tap, replacing the default STOP behavior for this domain. A button's hold actions run in addition to its normal press behavior once held past the hold time. A button's double-tap actions replace its normal tap on two quick taps, but only after that button's own tap is left waiting to confirm a second one didn't follow — a button can use hold OR double-tap, not both.",
         "data": {
           "middle_button": "STOP actions",
           "on_hold": "ON hold actions",
           "off_hold": "OFF hold actions",
-          "stop_hold": "STOP hold actions"
+          "stop_hold": "STOP hold actions",
+          "on_double_tap": "ON double-tap actions",
+          "off_double_tap": "OFF double-tap actions",
+          "stop_double_tap": "STOP double-tap actions"
         }
       },
       "buttons": {

@@ -10,7 +10,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.script import async_validate_actions_config
 
-from .const import ON_OFF_PICO_TYPES, VALID_PICO_TYPES
+from .const import ACCENT_LIGHT_PICO_TYPES, VALID_PICO_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -89,6 +89,14 @@ class PicoConfig:
     off_hold: list[ActionConfig] = field(default_factory=list)
     stop_hold: list[ActionConfig] = field(default_factory=list)
 
+    # 3BRL only. A button's tap defers to see whether a second tap
+    # follows within DOUBLE_TAP_WINDOW_MS: two taps run this instead of
+    # the tap firing twice. A button cannot define both this and its
+    # *_hold action (see validate()).
+    on_double_tap: list[ActionConfig] = field(default_factory=list)
+    off_double_tap: list[ActionConfig] = field(default_factory=list)
+    stop_double_tap: list[ActionConfig] = field(default_factory=list)
+
     # 4B only.
     buttons: dict[str, list[ActionConfig]] = field(default_factory=dict)
 
@@ -136,6 +144,12 @@ class PicoConfig:
                     "'off_hold', or 'stop_hold'."
                 )
 
+            if self.on_double_tap or self.off_double_tap or self.stop_double_tap:
+                raise ValueError(
+                    f"Pico {self.device_id} (4B) cannot define "
+                    "'on_double_tap', 'off_double_tap', or 'stop_double_tap'."
+                )
+
             return
 
         if len(active_domains) != 1:
@@ -160,10 +174,10 @@ class PicoConfig:
             )
 
         if self.accent_lights:
-            if self.type not in ON_OFF_PICO_TYPES:
+            if self.type not in ACCENT_LIGHT_PICO_TYPES:
                 raise ValueError(
                     f"Pico {self.device_id} ({self.type}) cannot define "
-                    "'accent_lights'. Only P2B and 2B Picos support "
+                    "'accent_lights'. Only P2B, 2B, and 3BRL Picos support "
                     "accent lights."
                 )
 
@@ -180,6 +194,18 @@ class PicoConfig:
                     f"Pico {self.device_id} lists "
                     f"{', '.join(sorted(overlap))} in both 'lights' "
                     "and 'accent_lights'."
+                )
+
+        for button, hold_actions, double_tap_actions in (
+            ("on", self.on_hold, self.on_double_tap),
+            ("off", self.off_hold, self.off_double_tap),
+            ("stop", self.stop_hold, self.stop_double_tap),
+        ):
+            if hold_actions and double_tap_actions:
+                raise ValueError(
+                    f"Pico {self.device_id} defines both '{button}_hold' "
+                    f"and '{button}_double_tap'. A button can use one or "
+                    "the other, not both."
                 )
 
 
@@ -832,6 +858,30 @@ async def parse_pico_config(
         field_name="stop_hold",
     )
 
+    on_double_tap = await _validate_3brl_action_field(
+        hass,
+        device_type,
+        device_raw.get("on_double_tap"),
+        placeholders,
+        field_name="on_double_tap",
+    )
+
+    off_double_tap = await _validate_3brl_action_field(
+        hass,
+        device_type,
+        device_raw.get("off_double_tap"),
+        placeholders,
+        field_name="off_double_tap",
+    )
+
+    stop_double_tap = await _validate_3brl_action_field(
+        hass,
+        device_type,
+        device_raw.get("stop_double_tap"),
+        placeholders,
+        field_name="stop_double_tap",
+    )
+
     # ------------------------------------------------------------
     # 4B BUTTONS
     # ------------------------------------------------------------
@@ -872,6 +922,9 @@ async def parse_pico_config(
         on_hold=on_hold,
         off_hold=off_hold,
         stop_hold=stop_hold,
+        on_double_tap=on_double_tap,
+        off_double_tap=off_double_tap,
+        stop_double_tap=stop_double_tap,
         buttons=buttons,
     )
 
