@@ -1,7 +1,7 @@
 # config_flow.py — UI configuration for Pico Link
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 import voluptuous as vol
 from homeassistant import config_entries
@@ -322,15 +322,50 @@ def _buttons_schema(
     )
 
 
+def _entry_device_ids(
+    entry_data: Mapping[str, Any],
+) -> list[str]:
+    """Return the device IDs a Pico Link entry's data represents."""
+    device_ids = entry_data.get("device_ids")
+
+    if isinstance(device_ids, list):
+        return device_ids
+
+    single = entry_data.get("device_id")
+
+    return [single] if single else []
+
+
+def _configured_device_ids(
+    hass: Any,
+    *,
+    exclude_entry_id: str | None = None,
+) -> set[str]:
+    """Return every device ID already claimed by another Pico Link entry."""
+    configured: set[str] = set()
+
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.entry_id == exclude_entry_id:
+            continue
+
+        configured.update(_entry_device_ids(entry.data))
+
+    return configured
+
+
 def _eligible_pico_devices(
     hass: Any,
+    *,
+    exclude_entry_id: str | None = None,
 ) -> dict[str, tuple[str, str]]:
     """
-    Find Lutron Pico remotes that aren't already configured.
+    Find Lutron Pico remotes that aren't claimed by another entry.
 
     Returns {device_id: (display_name, pico_type)}. The Pico type is
     read directly from the model Lutron reports, so it never needs to
     be entered by hand and can never disagree with the hardware.
+    Passing exclude_entry_id leaves that entry's own devices eligible,
+    so an options flow can offer them back for re-selection.
     """
     device_registry = dr.async_get(hass)
 
@@ -338,9 +373,10 @@ def _eligible_pico_devices(
         entry.entry_id for entry in hass.config_entries.async_entries("lutron_caseta")
     }
 
-    configured_device_ids = {
-        entry.data.get("device_id") for entry in hass.config_entries.async_entries(DOMAIN)
-    }
+    configured_device_ids = _configured_device_ids(
+        hass,
+        exclude_entry_id=exclude_entry_id,
+    )
 
     devices: dict[str, tuple[str, str]] = {}
 
@@ -378,12 +414,12 @@ class PicoLinkConfigFlow(
     config_entries.ConfigFlow,
     domain=DOMAIN,
 ):
-    """Handle adding a single Pico as a config entry."""
+    """Handle adding one or more identically-behaving Picos as one config entry."""
 
     VERSION = 1
 
     def __init__(self) -> None:
-        self._device_id: str | None = None
+        self._device_ids: list[str] = []
         self._type: str | None = None
         self._domain: str = ""
         self._title: str = ""
@@ -398,35 +434,51 @@ class PicoLinkConfigFlow(
         if not devices:
             return self.async_abort(reason="no_devices_found")
 
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            device_id = user_input["device_id"]
+            device_ids = user_input["device_ids"]
+            types = {devices[device_id][1] for device_id in device_ids}
 
-            await self.async_set_unique_id(device_id)
-            self._abort_if_unique_id_configured()
+            if len(types) > 1:
+                errors["base"] = "mixed_pico_types"
+            else:
+                unique_id = "+".join(sorted(device_ids))
 
-            self._device_id = device_id
-            self._title, self._type = devices[device_id]
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
 
-            if self._type == "4B":
-                return await self.async_step_buttons()
+                self._device_ids = device_ids
+                self._type = types.pop()
+                self._title = ", ".join(
+                    devices[device_id][0]
+                    for device_id in sorted(
+                        device_ids,
+                        key=lambda device_id: devices[device_id][0],
+                    )
+                )
 
-            return await self.async_step_entities()
+                if self._type == "4B":
+                    return await self.async_step_buttons()
+
+                return await self.async_step_entities()
 
         schema = vol.Schema(
             {
-                vol.Required("device_id"): selector.SelectSelector(
+                vol.Required("device_ids"): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=[
                             selector.SelectOptionDict(
                                 value=device_id,
-                                label=title,
+                                label=f"{title} ({pico_type})",
                             )
-                            for device_id, (title, _type) in sorted(
+                            for device_id, (title, pico_type) in sorted(
                                 devices.items(),
                                 key=lambda item: item[1][0],
                             )
                         ],
                         mode=selector.SelectSelectorMode.DROPDOWN,
+                        multiple=True,
                     )
                 ),
             }
@@ -435,6 +487,7 @@ class PicoLinkConfigFlow(
         return self.async_show_form(
             step_id="user",
             data_schema=schema,
+            errors=errors,
         )
 
     async def async_step_entities(
@@ -487,7 +540,7 @@ class PicoLinkConfigFlow(
         return self.async_create_entry(
             title=self._title,
             data={
-                "device_id": self._device_id,
+                "device_ids": self._device_ids,
                 "type": self._type,
             },
             options=self._options,
@@ -519,6 +572,8 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
     ) -> None:
         self._entry = config_entry
         self._type: str = config_entry.data["type"]
+        self._device_ids: list[str] = _entry_device_ids(config_entry.data)
+        self._title: str = config_entry.title
         self._domain: str = ""
         self._options: dict[str, Any] = dict(config_entry.options)
 
@@ -526,10 +581,78 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
-        if self._type == "4B":
-            return await self.async_step_buttons()
+        return await self.async_step_devices()
 
-        return await self.async_step_entities()
+    async def async_step_devices(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Edit which Pico(s) of this entry's type belong to this entry."""
+        eligible = {
+            device_id: info
+            for device_id, info in _eligible_pico_devices(
+                self.hass,
+                exclude_entry_id=self._entry.entry_id,
+            ).items()
+            if info[1] == self._type
+        }
+
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            device_ids = user_input["device_ids"]
+
+            if not device_ids:
+                errors["base"] = "at_least_one_device_required"
+            else:
+                self._device_ids = device_ids
+                self._title = ", ".join(
+                    eligible[device_id][0]
+                    for device_id in sorted(
+                        device_ids,
+                        key=lambda device_id: eligible[device_id][0],
+                    )
+                )
+
+                if self._type == "4B":
+                    return await self.async_step_buttons()
+
+                return await self.async_step_entities()
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    "device_ids",
+                    default=[
+                        device_id
+                        for device_id in self._device_ids
+                        if device_id in eligible
+                    ],
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            selector.SelectOptionDict(
+                                value=device_id,
+                                label=title,
+                            )
+                            for device_id, (title, _pico_type) in sorted(
+                                eligible.items(),
+                                key=lambda item: item[1][0],
+                            )
+                        ],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                        multiple=True,
+                    )
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="devices",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={"pico_type": self._type},
+        )
 
     async def async_step_entities(
         self,
@@ -651,6 +774,19 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         )
 
     def _async_finish(self) -> FlowResult:
+        # Update data/title and options together so this is one reload,
+        # not two — async_create_entry below would otherwise reapply
+        # the same options a second time via its own update_entry call.
+        self.hass.config_entries.async_update_entry(
+            self._entry,
+            data={
+                "device_ids": self._device_ids,
+                "type": self._type,
+            },
+            options=self._options,
+            title=self._title,
+        )
+
         return self.async_create_entry(
             title="",
             data=self._options,

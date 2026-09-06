@@ -37,6 +37,8 @@ scenes, scripts, and other Home Assistant actions.
 Features include:
 
 - Fully configured through the Home Assistant UI — no YAML editing
+- Group multiple identical Picos (e.g. several stairway remotes) under one
+  shared configuration
 - Tap-versus-hold detection where supported
 - Brightness, volume, and cover-position stepping
 - Continuous light, cover, and media-player ramping
@@ -129,40 +131,51 @@ Restart Home Assistant after installation or updates.
 
 ## Adding a Pico
 
-Each physical Pico remote is added and configured independently, entirely
-from the Home Assistant UI.
+One config entry can hold a single Pico or several — select multiple in the
+first step when they should all behave identically (for example, several
+remotes for the same stairway light). They share one configuration: entities,
+timing, and behavior are set once and apply to every Pico in the entry.
 
 1. Go to **Settings → Devices & Services**.
 2. Click **Add Integration** and choose **Pico Link**.
-3. Pick the Pico from the dropdown. Only Lutron Pico remotes that aren't
-   already configured are listed — the Smart Bridge, fan speed controllers,
-   and already-configured Picos don't show up. Its type is read directly
-   from the model Lutron reports, so there's nothing to select or get wrong.
+3. Pick one or more Picos from the list. Only Lutron Pico remotes that
+   aren't already configured (in this or any other entry) are listed — the
+   Smart Bridge, fan speed controllers, and already-configured Picos don't
+   show up. Every Pico you select must be the same type; each one's type is
+   read directly from the model Lutron reports, so there's nothing to select
+   or get wrong.
 4. **For `P2B`, `2B`, and `3BRL` Picos:** fill in the entities for the one
-   domain this Pico controls (cover, fan, light, media player, or switch),
-   and leave the other fields empty. Click **Submit** and you're done — it
-   starts working immediately with sensible default timing and behavior.
+   domain this entry's Pico(s) control (cover, fan, light, media player, or
+   switch), and leave the other fields empty. Click **Submit** and you're
+   done — it starts working immediately with sensible default timing and
+   behavior.
 5. **For `4B` Picos:** build an action sequence for each button
    (`button_1`, `button_2`, `button_3`, `off`) using Home Assistant's action
    picker. At least one button must be configured.
 
-The same physical Pico can only be configured once — adding it a second time
-is blocked automatically, and it drops out of the device list once added.
+The same physical Pico can only belong to one config entry — adding it a
+second time (on its own or as part of a new group) is blocked automatically,
+and it drops out of the device list once added.
 
 ### Editing a Pico
 
-Open the Pico's entry under **Settings → Devices & Services** and click
-**Configure**. Non-4B Picos get the same entity picker used during setup
-(you can even switch which domain it controls here), followed by the timing
-and domain-specific [options](#options), and for `3BRL` Picos, a STOP-button
-action builder — none of which the initial add flow asks about, since the
-defaults just work. 4B Picos get the same button-action editor used during
-setup. Changes take effect immediately; Pico Link automatically reloads the
-affected Pico.
+Open the entry under **Settings → Devices & Services** and click
+**Configure**. The first step lets you add or remove Picos from the entry —
+only Picos of this entry's type that aren't claimed by another entry are
+offered, and at least one must remain. Non-4B entries then get the same
+entity picker used during setup (you can even switch which domain it
+controls here), followed by the timing and domain-specific
+[options](#options), and for `3BRL` Picos, a STOP-button action builder —
+none of which the initial add flow asks about, since the defaults just work.
+4B entries get the same button-action editor used during setup. Changes take
+effect immediately and apply to every Pico in the entry; Pico Link
+automatically reloads them all.
 
-The Pico's underlying device and its type are fixed once created (since the
-type is read from the hardware, there's nothing to change there anyway). To
-link a different physical Pico, remove the integration entry and add it
+Each Pico's underlying device and its type are fixed (since the type is read
+from the hardware, there's nothing to change there anyway) — a Pico can't
+switch type or move to an entry of a different type. To link a different
+physical Pico for the first time, add it via a new or existing entry as
+above; to fully replace an entry's Pico type, remove the entry and add it
 again.
 
 ### Removing a Pico

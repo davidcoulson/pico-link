@@ -2,15 +2,15 @@
   "config": {
     "step": {
       "user": {
-        "title": "Add a Pico",
-        "description": "Select the Pico remote to link. Only Lutron Pico devices that aren't already configured are listed — its type is detected automatically from the hardware, so there's nothing else to pick here.",
+        "title": "Add Pico(s)",
+        "description": "Select one or more Pico remotes to link as a single entry — pick several when they should all behave identically (e.g. multiple remotes for the same stairway light); their entities, timing, and behavior are configured once and shared. Only unconfigured Lutron Pico devices are listed, and all selected must be the same type — its type is detected automatically from the hardware, so there's nothing else to pick here.",
         "data": {
-          "device_id": "Pico device"
+          "device_ids": "Pico device(s)"
         }
       },
       "entities": {
-        "title": "What does this Pico control?",
-        "description": "Fill in the entities for the ONE domain this Pico controls, and leave the rest empty.",
+        "title": "What do these Picos control?",
+        "description": "Fill in the entities for the ONE domain this entry's Pico(s) control, and leave the rest empty. If you selected more than one Pico, they all share this configuration.",
         "data": {
           "covers": "Covers",
           "fans": "Fans",
@@ -32,7 +32,8 @@
     },
     "error": {
       "single_domain_required": "Fill in exactly one of the fields above — the one domain this Pico controls — and leave the rest empty.",
-      "buttons_required": "Configure at least one button with actions."
+      "buttons_required": "Configure at least one button with actions.",
+      "mixed_pico_types": "Select devices of only one Pico type — the devices you picked aren't all the same type."
     },
     "abort": {
       "already_configured": "This Pico is already configured.",
@@ -41,9 +42,16 @@
   },
   "options": {
     "step": {
+      "devices": {
+        "title": "Edit Pico(s) in this entry",
+        "description": "Add or remove Picos from this entry. Only Picos of this entry's type ({pico_type}) that aren't claimed by another entry are offered; at least one must remain selected. The rest of this entry's configuration is shared by every Pico selected here.",
+        "data": {
+          "device_ids": "Pico device(s)"
+        }
+      },
       "entities": {
-        "title": "What does this Pico control?",
-        "description": "Fill in the entities for the ONE domain this Pico controls, and leave the rest empty.",
+        "title": "What do these Picos control?",
+        "description": "Fill in the entities for the ONE domain this entry's Pico(s) control, and leave the rest empty. If this entry has more than one Pico, they all share this configuration.",
         "data": {
           "covers": "Covers",
           "fans": "Fans",
@@ -54,7 +62,7 @@
       },
       "options": {
         "title": "Options",
-        "description": "Fine-tune timing and behavior for this Pico.",
+        "description": "Fine-tune timing and behavior. Applies to every Pico in this entry.",
         "data": {
           "hold_time_ms": "Hold time",
           "step_time_ms": "Step time",
@@ -101,7 +109,8 @@
     },
     "error": {
       "single_domain_required": "Fill in exactly one of the fields above — the one domain this Pico controls — and leave the rest empty.",
-      "buttons_required": "Configure at least one button with actions."
+      "buttons_required": "Configure at least one button with actions.",
+      "at_least_one_device_required": "Select at least one Pico to keep in this entry."
     }
   }
 }

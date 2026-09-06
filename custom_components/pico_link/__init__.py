@@ -13,42 +13,67 @@ from .controller import PicoController
 
 _LOGGER = logging.getLogger(__name__)
 
-type PicoLinkConfigEntry = ConfigEntry[PicoController]
+type PicoLinkConfigEntry = ConfigEntry[list[PicoController]]
+
+
+def _entry_device_ids(entry: PicoLinkConfigEntry) -> list[str]:
+    """
+    Return the device IDs a config entry represents.
+
+    Entries created before multi-device support stored a single
+    "device_id"; current entries store a "device_ids" list. Both are
+    supported here so existing entries keep working without migration.
+    """
+    device_ids = entry.data.get("device_ids")
+
+    if device_ids:
+        return device_ids
+
+    return [entry.data["device_id"]]
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: PicoLinkConfigEntry,
 ) -> bool:
-    """Set up one Pico from a config entry."""
-    device_raw = {
-        "device_id": entry.data["device_id"],
-        "type": entry.data["type"],
-        **entry.options,
-    }
+    """Set up every identically-configured Pico in a config entry."""
+    controllers: list[PicoController] = []
 
-    try:
-        pico_config = await parse_pico_config(
+    for device_id in _entry_device_ids(entry):
+        device_raw = {
+            "device_id": device_id,
+            "type": entry.data["type"],
+            **entry.options,
+        }
+
+        try:
+            pico_config = await parse_pico_config(
+                hass,
+                device_raw,
+            )
+        except ValueError as err:
+            _LOGGER.error(
+                "%s: invalid configuration for entry %s (device %s): %s",
+                DOMAIN,
+                entry.entry_id,
+                device_id,
+                err,
+            )
+
+            for started in controllers:
+                await started.async_stop()
+
+            return False
+
+        controller = PicoController(
             hass,
-            device_raw,
+            pico_config,
         )
-    except ValueError as err:
-        _LOGGER.error(
-            "%s: invalid configuration for entry %s: %s",
-            DOMAIN,
-            entry.entry_id,
-            err,
-        )
-        return False
 
-    controller = PicoController(
-        hass,
-        pico_config,
-    )
+        await controller.async_start()
+        controllers.append(controller)
 
-    await controller.async_start()
-
-    entry.runtime_data = controller
+    entry.runtime_data = controllers
 
     # Make sure Pico work is unsubscribed and stopped on a clean HA
     # shutdown, not just on entry unload. Must be a @callback so the
@@ -56,7 +81,8 @@ async def async_setup_entry(
     # an executor thread, since it calls hass.async_create_task.
     @callback
     def _handle_stop(_event: Event) -> None:
-        hass.async_create_task(controller.async_stop())
+        for controller in controllers:
+            hass.async_create_task(controller.async_stop())
 
     unsub_stop = hass.bus.async_listen_once(
         EVENT_HOMEASSISTANT_STOP,
@@ -74,7 +100,9 @@ async def async_unload_entry(
     entry: PicoLinkConfigEntry,
 ) -> bool:
     """Unload a Pico config entry."""
-    await entry.runtime_data.async_stop()
+    for controller in entry.runtime_data:
+        await controller.async_stop()
+
     return True
 
 
