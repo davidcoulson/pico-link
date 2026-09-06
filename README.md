@@ -576,6 +576,12 @@ This is intentional. Fan controls are tap-only.
 
 ## Updating
 
+### Versioning
+
+Releases use calendar versioning: `YYYY.MM.DD.XX` (e.g. `2026.09.06.01`).
+`XX` starts at `01` each day and increments for additional releases on that
+same date.
+
 After installing an updated version:
 
 1. Restart Home Assistant.
