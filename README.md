@@ -3,12 +3,20 @@
 ### Lutron Pico remotes as domain-aware Home Assistant controllers
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
-![GitHub release](https://img.shields.io/github/v/release/smartqasa/pico-link)
-![GitHub License](https://img.shields.io/github/license/smartqasa/pico-link)
+![GitHub release](https://img.shields.io/github/v/release/davidcoulson/pico-link)
+![GitHub License](https://img.shields.io/github/license/davidcoulson/pico-link)
 
 <p align="center">
   <img src="pico.png" width="180" alt="Pico Link logo">
 </p>
+
+---
+
+> **This is a fork of [smartqasa/pico-link](https://github.com/smartqasa/pico-link).**
+> This fork replaces YAML configuration with full setup and editing through
+> the Home Assistant UI (Settings → Devices & Services) — see
+> [Adding a Pico](#adding-a-pico) below. Development of this fork was
+> AI-assisted (Claude).
 
 ---
 
@@ -81,7 +89,7 @@ does not match the configured type.
 3. Add:
 
    ```text
-   https://github.com/smartqasa/pico-link
+   https://github.com/davidcoulson/pico-link
    ```
 
 4. Select **Integration** as the repository type.
