@@ -33,13 +33,16 @@
   [Dual-light mode](#dual-light-mode).
 - **Light on/off toggle option** — ON and OFF can each independently toggle
   a light's state instead of always issuing a discrete turn-on/turn-off.
-- **3BRL hold and double-tap actions** — ON, OFF, and STOP can each run a
-  custom action sequence when held (in addition to their normal tap
-  behavior) or on two quick taps (instead of it) — a button can use one or
-  the other. See [3BRL custom actions](#3brl-custom-actions).
-- **A `pico_link_button` event** for every mapped press/release, so
-  automations (or a tool like Node-RED) can react to a Pico's normalized
-  button/domain without re-deriving it from the raw Lutron event. See
+- **Hold and double-tap actions (3BRL, 4B)** — ON, OFF, and STOP on a 3BRL,
+  or any button on a 4B, can each run a custom action sequence when held
+  (in addition to their normal tap behavior) or on two quick taps (instead
+  of it) — a button can use one or the other. See
+  [3BRL custom actions](#3brl-custom-actions).
+- **A `pico_link_button` event, and device triggers for it** — fired for
+  every mapped press/release, so automations (or a tool like Node-RED) can
+  react to a Pico's normalized button/domain without re-deriving it from
+  the raw Lutron event; also selectable straight from the automation
+  editor's device trigger picker, no YAML required. See
   [The pico_link_button event](#the-pico_link_button-event).
 - **Custom actions run through Home Assistant's real script engine** — STOP
   buttons and 4B scene buttons support the same conditions, if-then, choose,
@@ -505,6 +508,16 @@ At least one button must have actions configured. Actions execute
 sequentially in the order they were added; each action completes before the
 next one begins.
 
+Each button can also optionally define a hold action or a double-tap
+action (not both), configured on the **Scene hold and double-tap actions**
+step in the options flow. These follow the same rules as
+[3BRL custom actions](#3brl-custom-actions): a hold action runs in addition
+to the button's scene action once held past `hold_time_ms`; a double-tap
+action replaces the scene action on two quick taps, which delays that
+specific button's scene action by up to `DOUBLE_TAP_WINDOW_MS` (400ms) to
+confirm a second tap didn't follow — buttons without one configured are
+completely unaffected.
+
 ---
 
 ## STOP Actions and Domain Defaults
@@ -715,6 +728,16 @@ trigger:
       button: "on"
       action: press
 ```
+
+### Device triggers
+
+For the same thing without writing YAML by hand, use the automation
+editor's own trigger picker: **Add Trigger → Device → (your Pico) →** and
+choose one of the listed "`<button>` pressed" / "`<button>` released"
+options. This builds the same event trigger shown above — it's a UI
+shortcut over `pico_link_button`, not a separate mechanism, and only
+offers the buttons that Pico's type actually has (e.g. a P2B only offers
+ON/OFF; a 4B offers its four scene buttons).
 
 ---
 

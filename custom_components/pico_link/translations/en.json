@@ -1,4 +1,20 @@
 {
+  "device_automation": {
+    "trigger_subtype": {
+      "on": "On",
+      "off": "Off",
+      "stop": "Stop",
+      "raise": "Raise",
+      "lower": "Lower",
+      "button_1": "Button 1",
+      "button_2": "Button 2",
+      "button_3": "Button 3"
+    },
+    "trigger_type": {
+      "press": "\"{subtype}\" pressed",
+      "release": "\"{subtype}\" released"
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -120,6 +136,20 @@
           "button_2": "Button 2",
           "button_3": "Button 3",
           "off": "Off button"
+        }
+      },
+      "scene_hold_actions": {
+        "title": "Scene hold and double-tap actions",
+        "description": "All optional. A button's hold actions run in addition to its scene action once held past the hold time. A button's double-tap actions replace its scene action on two quick taps, but only after that button's own tap is left waiting to confirm a second one didn't follow — a button can use hold OR double-tap, not both.",
+        "data": {
+          "button_1_hold": "Button 1 hold actions",
+          "button_1_double_tap": "Button 1 double-tap actions",
+          "button_2_hold": "Button 2 hold actions",
+          "button_2_double_tap": "Button 2 double-tap actions",
+          "button_3_hold": "Button 3 hold actions",
+          "button_3_double_tap": "Button 3 double-tap actions",
+          "off_hold": "Off button hold actions",
+          "off_double_tap": "Off button double-tap actions"
         }
       }
     },

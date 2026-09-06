@@ -39,10 +39,20 @@ ACCENT_LIGHT_PICO_TYPES = frozenset({"P2B", "2B", "3BRL"})
 # semantics without re-deriving them from the raw Lutron event.
 PICO_BUTTON_EVENT = f"{DOMAIN}_button"
 
-# Max gap between two taps of the same 3BRL button to count as a
-# double tap, in milliseconds. Only buttons with a configured
-# *_double_tap action wait this long before resolving a tap.
+# Max gap between two taps of the same button to count as a double
+# tap, in milliseconds. Only buttons with a configured *_double_tap
+# action wait this long before resolving a tap.
 DOUBLE_TAP_WINDOW_MS = 400
+
+# Buttons each Pico type actually reports, for building device
+# triggers. Order controls how they're offered in the automation
+# editor's trigger picker.
+PICO_TYPE_BUTTONS = {
+    "P2B": ("on", "off"),
+    "2B": ("on", "off"),
+    "3BRL": ("on", "off", "raise", "lower", "stop"),
+    "4B": ("button_1", "button_2", "button_3", "off"),
+}
 
 # --------------------------------------------------------------------
 # BUTTONS EMITTED BY LUTRON CASETA

@@ -97,8 +97,12 @@ class PicoConfig:
     off_double_tap: list[ActionConfig] = field(default_factory=list)
     stop_double_tap: list[ActionConfig] = field(default_factory=list)
 
-    # 4B only.
+    # 4B only. button_hold/button_double_tap are optional, keyed by
+    # button name; a button missing from either mapping has none
+    # configured. A button cannot appear in both (see validate()).
     buttons: dict[str, list[ActionConfig]] = field(default_factory=dict)
+    button_hold: dict[str, list[ActionConfig]] = field(default_factory=dict)
+    button_double_tap: dict[str, list[ActionConfig]] = field(default_factory=dict)
 
     def validate(self) -> None:
         """Validate the normalized Pico configuration."""
@@ -150,6 +154,15 @@ class PicoConfig:
                     "'on_double_tap', 'off_double_tap', or 'stop_double_tap'."
                 )
 
+            both = set(self.button_hold) & set(self.button_double_tap)
+
+            if both:
+                raise ValueError(
+                    f"Pico {self.device_id} defines both 'button_hold' and "
+                    f"'button_double_tap' for {', '.join(sorted(both))}. A "
+                    "button can use one or the other, not both."
+                )
+
             return
 
         if len(active_domains) != 1:
@@ -171,6 +184,13 @@ class PicoConfig:
                 f"Pico {self.device_id} ({self.type}) cannot "
                 "define 'buttons'. 'buttons' is only valid for "
                 "4B Picos."
+            )
+
+        if self.button_hold or self.button_double_tap:
+            raise ValueError(
+                f"Pico {self.device_id} ({self.type}) cannot define "
+                "'button_hold' or 'button_double_tap'. They are only "
+                "valid for 4B Picos."
             )
 
         if self.accent_lights:
@@ -516,19 +536,31 @@ async def _validate_3brl_action_field(
 async def _validate_buttons(
     hass: HomeAssistant,
     value: Any,
+    *,
+    field_name: str = "buttons",
+    require_actions: bool = True,
 ) -> dict[str, list[ActionConfig]]:
-    """Validate a 4B button-to-action mapping."""
+    """
+    Validate a 4B button-to-action mapping.
+
+    Used for the main 'buttons' mapping (every listed button must have
+    at least one action) and for the optional 'button_hold' /
+    'button_double_tap' mappings (a button with no actions is simply
+    dropped, since those are opt-in per button).
+    """
     if value is None:
         return {}
 
     if not isinstance(value, dict):
-        raise ValueError("'buttons' must be a mapping of button names to action lists.")
+        raise ValueError(
+            f"'{field_name}' must be a mapping of button names to action lists."
+        )
 
     buttons: dict[str, list[ActionConfig]] = {}
 
     for raw_button, raw_actions in value.items():
         if not isinstance(raw_button, str):
-            raise ValueError("Each 'buttons' key must be a string.")
+            raise ValueError(f"Each '{field_name}' key must be a string.")
 
         button = raw_button.strip()
 
@@ -536,17 +568,23 @@ async def _validate_buttons(
             valid_buttons = ", ".join(sorted(_VALID_4B_BUTTONS))
 
             raise ValueError(
-                f"Unsupported 4B button {button!r}. Valid buttons are: {valid_buttons}."
+                f"Unsupported {field_name} button {button!r}. Valid buttons "
+                f"are: {valid_buttons}."
             )
 
         actions = await _validate_actions(
             hass,
             raw_actions,
-            context=f"buttons.{button}",
+            context=f"{field_name}.{button}",
         )
 
         if not actions:
-            raise ValueError(f"'buttons.{button}' must contain at least one action.")
+            if require_actions:
+                raise ValueError(
+                    f"'{field_name}.{button}' must contain at least one action."
+                )
+
+            continue
 
         buttons[button] = actions
 
@@ -891,6 +929,20 @@ async def parse_pico_config(
         merged.get("buttons"),
     )
 
+    button_hold = await _validate_buttons(
+        hass,
+        merged.get("button_hold"),
+        field_name="button_hold",
+        require_actions=False,
+    )
+
+    button_double_tap = await _validate_buttons(
+        hass,
+        merged.get("button_double_tap"),
+        field_name="button_double_tap",
+        require_actions=False,
+    )
+
     # ------------------------------------------------------------
     # BUILD CONFIGURATION
     # ------------------------------------------------------------
@@ -926,6 +978,8 @@ async def parse_pico_config(
         off_double_tap=off_double_tap,
         stop_double_tap=stop_double_tap,
         buttons=buttons,
+        button_hold=button_hold,
+        button_double_tap=button_double_tap,
     )
 
     pico_config.validate()

@@ -504,6 +504,34 @@ def _buttons_schema(
     )
 
 
+def _scene_hold_actions_schema(
+    current: dict[str, Any] | None = None,
+) -> vol.Schema:
+    """4B only: optional hold/double-tap actions per scene button."""
+    current = current or {}
+    button_hold = current.get("button_hold") or {}
+    button_double_tap = current.get("button_double_tap") or {}
+
+    fields: dict[Any, Any] = {}
+
+    for name in SCENE_BUTTONS:
+        fields[
+            vol.Optional(
+                f"{name}_hold",
+                default=list(button_hold.get(name, [])),
+            )
+        ] = selector.ActionSelector()
+
+        fields[
+            vol.Optional(
+                f"{name}_double_tap",
+                default=list(button_double_tap.get(name, [])),
+            )
+        ] = selector.ActionSelector()
+
+    return vol.Schema(fields)
+
+
 def _entry_device_ids(
     entry_data: Mapping[str, Any],
 ) -> list[str]:
@@ -1084,7 +1112,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 errors["base"] = "buttons_required"
             else:
                 self._options["buttons"] = buttons
-                return self._async_finish()
+                return await self.async_step_scene_hold_actions()
 
         return self.async_show_form(
             step_id="buttons",
@@ -1092,6 +1120,35 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 current=self._options.get("buttons"),
             ),
             errors=errors,
+        )
+
+    async def async_step_scene_hold_actions(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """4B only: optional hold/double-tap actions per scene button."""
+        if user_input is not None:
+            button_hold: dict[str, Any] = {}
+            button_double_tap: dict[str, Any] = {}
+
+            for name in SCENE_BUTTONS:
+                hold_actions = user_input.get(f"{name}_hold") or []
+                double_tap_actions = user_input.get(f"{name}_double_tap") or []
+
+                if hold_actions:
+                    button_hold[name] = hold_actions
+
+                if double_tap_actions:
+                    button_double_tap[name] = double_tap_actions
+
+            self._options["button_hold"] = button_hold
+            self._options["button_double_tap"] = button_double_tap
+
+            return self._async_finish()
+
+        return self.async_show_form(
+            step_id="scene_hold_actions",
+            data_schema=_scene_hold_actions_schema(current=self._options),
         )
 
     def _async_finish(self) -> FlowResult:
