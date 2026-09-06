@@ -117,7 +117,7 @@
       },
       "custom_actions": {
         "title": "Custom actions",
-        "description": "All optional. 'STOP actions' run on every STOP tap, replacing the default STOP behavior for this domain. A button's hold actions run in addition to its normal press behavior once held past the hold time. A button's double-tap actions replace its normal tap on two quick taps, but only after that button's own tap is left waiting to confirm a second one didn't follow — a button can use hold OR double-tap, not both.",
+        "description": "All optional. 'STOP actions' run on every STOP tap, replacing the default STOP behavior for this domain. A button's hold actions run in addition to its normal press behavior once held past the hold time. A button's double-tap actions replace its normal tap on two quick taps, but only after that button's own tap is left waiting to confirm a second one didn't follow — a button can use hold OR double-tap, not both. Pick one from 'Test an action' and submit to run it immediately with what's filled in now, without leaving this step or saving.",
         "data": {
           "middle_button": "STOP actions",
           "on_hold": "ON hold actions",
@@ -125,7 +125,8 @@
           "stop_hold": "STOP hold actions",
           "on_double_tap": "ON double-tap actions",
           "off_double_tap": "OFF double-tap actions",
-          "stop_double_tap": "STOP double-tap actions"
+          "stop_double_tap": "STOP double-tap actions",
+          "test_action": "Test an action"
         }
       },
       "buttons": {
@@ -140,7 +141,7 @@
       },
       "scene_hold_actions": {
         "title": "Scene hold and double-tap actions",
-        "description": "All optional. A button's hold actions run in addition to its scene action once held past the hold time. A button's double-tap actions replace its scene action on two quick taps, but only after that button's own tap is left waiting to confirm a second one didn't follow — a button can use hold OR double-tap, not both.",
+        "description": "All optional. A button's hold actions run in addition to its scene action once held past the hold time. A button's double-tap actions replace its scene action on two quick taps, but only after that button's own tap is left waiting to confirm a second one didn't follow — a button can use hold OR double-tap, not both. Pick one from 'Test an action' and submit to run it immediately with what's filled in now, without leaving this step or saving.",
         "data": {
           "button_1_hold": "Button 1 hold actions",
           "button_1_double_tap": "Button 1 double-tap actions",
@@ -149,14 +150,17 @@
           "button_3_hold": "Button 3 hold actions",
           "button_3_double_tap": "Button 3 double-tap actions",
           "off_hold": "Off button hold actions",
-          "off_double_tap": "Off button double-tap actions"
+          "off_double_tap": "Off button double-tap actions",
+          "test_action": "Test an action"
         }
       }
     },
     "error": {
       "single_domain_required": "Fill in exactly one of the fields above — the one domain this Pico controls — and leave the rest empty.",
       "buttons_required": "Configure at least one button with actions.",
-      "at_least_one_device_required": "Select at least one Pico to keep in this entry."
+      "at_least_one_device_required": "Select at least one Pico to keep in this entry.",
+      "hold_and_double_tap_conflict": "A button can use hold actions or double-tap actions, not both — remove one before continuing.",
+      "test_action_failed": "The test action failed to run. Check the log for details; your other entries here were kept."
     }
   },
   "issues": {

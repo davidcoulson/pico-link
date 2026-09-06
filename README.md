@@ -36,8 +36,9 @@
 - **Hold and double-tap actions (3BRL, 4B)** — ON, OFF, and STOP on a 3BRL,
   or any button on a 4B, can each run a custom action sequence when held
   (in addition to their normal tap behavior) or on two quick taps (instead
-  of it) — a button can use one or the other. See
-  [3BRL custom actions](#3brl-custom-actions).
+  of it) — a button can use one or the other, checked inline on the options
+  step rather than deferred to a later error, and testable immediately from
+  that same step. See [3BRL custom actions](#3brl-custom-actions).
 - **A `pico_link_button` event, and device triggers for it** — fired for
   every mapped press/release, so automations (or a tool like Node-RED) can
   react to a Pico's normalized button/domain without re-deriving it from
@@ -546,10 +547,11 @@ To use the domain default, leave STOP actions empty on that step.
 
 On the **Custom actions** step, ON, OFF, and STOP can each additionally run
 a custom action sequence — either on a hold, or on a double tap, but not
-both on the same button (configuring both is rejected the same way any
-other invalid configuration is, showing as **Setup failed** until fixed).
-Leave a button's fields empty to skip it entirely; with nothing configured,
-no timer is created and there's no behavior change at all.
+both on the same button. Filling in both for one button is caught right on
+this step (an inline error naming the conflict), not deferred to a later
+**Setup failed**. Leave a button's fields empty to skip it entirely; with
+nothing configured, no timer is created and there's no behavior change at
+all.
 
 - **Hold** (`on_hold` / `off_hold` / `stop_hold`) — runs once that button
   has been held past `hold_time_ms`, in addition to its normal tap/press
@@ -567,6 +569,12 @@ no timer is created and there's no behavior change at all.
   only ever applies to a button you've explicitly set one up for. This is
   how you can, for example, have OFF turn off one light on a tap but a
   whole room on a double tap.
+
+**Test an action** on this step (and on 4B's equivalent step) picks one of
+the fields above and runs it immediately with whatever's currently filled
+in when you submit, re-showing this same step with your values kept
+afterward — so a STOP/hold/double-tap action can be checked before you save
+and walk over to the physical remote.
 
 ---
 
@@ -655,8 +663,11 @@ step can be submitted:
 
 If a Pico's configuration becomes invalid after an update (for example, an
 assigned entity was deleted), Home Assistant marks that Pico's entry as
-**Setup failed** under **Devices & Services**, with the reason in the Pico
-Link log. Other configured Picos are unaffected.
+**Setup failed** under **Devices & Services**, with the specific reason
+shown right on the entry (also logged). Other configured Picos are
+unaffected. Mutually-exclusive fields (a button's hold and double-tap
+actions) are additionally caught inline on the options step itself, before
+they ever reach this point.
 
 ---
 
@@ -756,9 +767,10 @@ Confirm:
 
 ### A Pico's entry shows "Setup failed"
 
-Check the Pico Link log entries for that device for the specific validation
-error, then use **Configure** on the entry to fix it (for example,
-reassigning a deleted entity).
+The specific validation error is shown right on the entry (expand it under
+**Settings → Devices & Services**), not just in the log — for example, a
+reassigned/deleted entity, or (for 3BRL/4B) a button with both a hold and a
+double-tap action configured. Use **Configure** on the entry to fix it.
 
 ### Configured and reported Pico types do not match
 

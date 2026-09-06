@@ -1,14 +1,16 @@
 # config_flow.py — UI configuration for Pico Link
 from __future__ import annotations
 
+import logging
 from typing import Any, Mapping
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.core import callback
+from homeassistant.core import Context, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import selector
+from homeassistant.helpers.script import Script
 
 from .const import (
     ACCENT_LIGHT_PICO_TYPES,
@@ -17,6 +19,35 @@ from .const import (
     PICO_TYPE_MAP,
     SCENE_BUTTONS,
 )
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def _run_test_action(
+    hass: Any,
+    actions: list[dict[str, Any]],
+    name: str,
+) -> bool:
+    """
+    Run a configured action sequence immediately, to preview it while editing.
+
+    Returns False (and logs) if the sequence itself raised; this is a
+    best-effort preview, not the authoritative validation (that already
+    happened when the actions were built with the action picker).
+    """
+    if not actions:
+        return True
+
+    script = Script(hass, actions, name, DOMAIN)
+
+    try:
+        await script.async_run(context=Context())
+    except Exception:
+        _LOGGER.exception("Error running test action %r", name)
+        return False
+
+    return True
+
 
 # ================================================================
 # SHARED SCHEMA BUILDERS
@@ -442,50 +473,88 @@ def _accent_light_appearance_schema(
     return vol.Schema(fields)
 
 
+_TEST_ACTION_NONE = "none"
+
+
+def _test_action_field(labels: dict[str, str]) -> selector.SelectSelector:
+    """Build a 'test which action?' dropdown for a custom-actions step."""
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[
+                selector.SelectOptionDict(
+                    value=_TEST_ACTION_NONE,
+                    label="Don't test anything",
+                ),
+                *(
+                    selector.SelectOptionDict(value=field, label=label)
+                    for field, label in labels.items()
+                ),
+            ],
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+
+
 def _custom_actions_schema(
     current: dict[str, Any] | None = None,
 ) -> vol.Schema:
     """
     3BRL only: the STOP-tap action, plus ON/OFF/STOP hold and double-tap actions.
 
-    A button's hold and double-tap fields are mutually exclusive (see
-    PicoConfig.validate()); the UI doesn't enforce that itself, so
-    filling in both surfaces as a "Setup failed" error on submit.
+    A button's hold and double-tap fields are mutually exclusive
+    (checked on submit — see PicoLinkOptionsFlow.async_step_custom_actions).
     """
     current = current or {}
 
-    return vol.Schema(
+    fields: dict[Any, Any] = {
+        vol.Optional(
+            "middle_button",
+            default=list(current.get("middle_button", [])),
+        ): selector.ActionSelector(),
+        vol.Optional(
+            "on_hold",
+            default=list(current.get("on_hold", [])),
+        ): selector.ActionSelector(),
+        vol.Optional(
+            "off_hold",
+            default=list(current.get("off_hold", [])),
+        ): selector.ActionSelector(),
+        vol.Optional(
+            "stop_hold",
+            default=list(current.get("stop_hold", [])),
+        ): selector.ActionSelector(),
+        vol.Optional(
+            "on_double_tap",
+            default=list(current.get("on_double_tap", [])),
+        ): selector.ActionSelector(),
+        vol.Optional(
+            "off_double_tap",
+            default=list(current.get("off_double_tap", [])),
+        ): selector.ActionSelector(),
+        vol.Optional(
+            "stop_double_tap",
+            default=list(current.get("stop_double_tap", [])),
+        ): selector.ActionSelector(),
+    }
+
+    fields[
+        vol.Optional(
+            "test_action",
+            default=_TEST_ACTION_NONE,
+        )
+    ] = _test_action_field(
         {
-            vol.Optional(
-                "middle_button",
-                default=list(current.get("middle_button", [])),
-            ): selector.ActionSelector(),
-            vol.Optional(
-                "on_hold",
-                default=list(current.get("on_hold", [])),
-            ): selector.ActionSelector(),
-            vol.Optional(
-                "off_hold",
-                default=list(current.get("off_hold", [])),
-            ): selector.ActionSelector(),
-            vol.Optional(
-                "stop_hold",
-                default=list(current.get("stop_hold", [])),
-            ): selector.ActionSelector(),
-            vol.Optional(
-                "on_double_tap",
-                default=list(current.get("on_double_tap", [])),
-            ): selector.ActionSelector(),
-            vol.Optional(
-                "off_double_tap",
-                default=list(current.get("off_double_tap", [])),
-            ): selector.ActionSelector(),
-            vol.Optional(
-                "stop_double_tap",
-                default=list(current.get("stop_double_tap", [])),
-            ): selector.ActionSelector(),
+            "middle_button": "STOP actions",
+            "on_hold": "ON hold actions",
+            "off_hold": "OFF hold actions",
+            "stop_hold": "STOP hold actions",
+            "on_double_tap": "ON double-tap actions",
+            "off_double_tap": "OFF double-tap actions",
+            "stop_double_tap": "STOP double-tap actions",
         }
     )
+
+    return vol.Schema(fields)
 
 
 def _buttons_schema(
@@ -507,20 +576,30 @@ def _buttons_schema(
 def _scene_hold_actions_schema(
     current: dict[str, Any] | None = None,
 ) -> vol.Schema:
-    """4B only: optional hold/double-tap actions per scene button."""
+    """
+    4B only: optional hold/double-tap actions per scene button.
+
+    A button's hold and double-tap fields are mutually exclusive
+    (checked on submit — see
+    PicoLinkOptionsFlow.async_step_scene_hold_actions).
+    """
     current = current or {}
     button_hold = current.get("button_hold") or {}
     button_double_tap = current.get("button_double_tap") or {}
 
     fields: dict[Any, Any] = {}
+    test_labels: dict[str, str] = {}
 
     for name in SCENE_BUTTONS:
+        label = "Off button" if name == "off" else name.replace("_", " ").title()
+
         fields[
             vol.Optional(
                 f"{name}_hold",
                 default=list(button_hold.get(name, [])),
             )
         ] = selector.ActionSelector()
+        test_labels[f"{name}_hold"] = f"{label} hold actions"
 
         fields[
             vol.Optional(
@@ -528,6 +607,14 @@ def _scene_hold_actions_schema(
                 default=list(button_double_tap.get(name, [])),
             )
         ] = selector.ActionSelector()
+        test_labels[f"{name}_double_tap"] = f"{label} double-tap actions"
+
+    fields[
+        vol.Optional(
+            "test_action",
+            default=_TEST_ACTION_NONE,
+        )
+    ] = _test_action_field(test_labels)
 
     return vol.Schema(fields)
 
@@ -790,6 +877,8 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         self._options: dict[str, Any] = dict(config_entry.options)
         self._accent_presets: list[dict[str, Any]] = []
         self._preview_prefill: dict[str, Any] | None = None
+        self._custom_actions_prefill: dict[str, Any] | None = None
+        self._scene_hold_prefill: dict[str, Any] | None = None
 
     async def async_step_init(
         self,
@@ -1078,23 +1167,57 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
         """3BRL only: the STOP-tap action, plus ON/OFF/STOP hold and double-tap actions."""
-        if user_input is not None:
-            for field_name in (
-                "middle_button",
-                "on_hold",
-                "off_hold",
-                "stop_hold",
-                "on_double_tap",
-                "off_double_tap",
-                "stop_double_tap",
-            ):
-                self._options[field_name] = user_input.get(field_name, [])
+        errors: dict[str, str] = {}
 
-            return self._async_finish()
+        if user_input is not None:
+            test_action = user_input.pop("test_action", _TEST_ACTION_NONE)
+
+            if test_action != _TEST_ACTION_NONE:
+                success = await _run_test_action(
+                    self.hass,
+                    user_input.get(test_action) or [],
+                    f"pico_link_test_{test_action}",
+                )
+
+                if not success:
+                    errors["base"] = "test_action_failed"
+
+                self._custom_actions_prefill = user_input
+            else:
+                conflicts = [
+                    button
+                    for button, hold_field, tap_field in (
+                        ("ON", "on_hold", "on_double_tap"),
+                        ("OFF", "off_hold", "off_double_tap"),
+                        ("STOP", "stop_hold", "stop_double_tap"),
+                    )
+                    if user_input.get(hold_field) and user_input.get(tap_field)
+                ]
+
+                if conflicts:
+                    errors["base"] = "hold_and_double_tap_conflict"
+                    self._custom_actions_prefill = user_input
+                else:
+                    for field_name in (
+                        "middle_button",
+                        "on_hold",
+                        "off_hold",
+                        "stop_hold",
+                        "on_double_tap",
+                        "off_double_tap",
+                        "stop_double_tap",
+                    ):
+                        self._options[field_name] = user_input.get(field_name, [])
+
+                    self._custom_actions_prefill = None
+                    return self._async_finish()
 
         return self.async_show_form(
             step_id="custom_actions",
-            data_schema=_custom_actions_schema(current=self._options),
+            data_schema=_custom_actions_schema(
+                current=self._custom_actions_prefill or self._options,
+            ),
+            errors=errors,
         )
 
     async def async_step_buttons(
@@ -1127,28 +1250,59 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
         """4B only: optional hold/double-tap actions per scene button."""
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            button_hold: dict[str, Any] = {}
-            button_double_tap: dict[str, Any] = {}
+            test_action = user_input.pop("test_action", _TEST_ACTION_NONE)
 
-            for name in SCENE_BUTTONS:
-                hold_actions = user_input.get(f"{name}_hold") or []
-                double_tap_actions = user_input.get(f"{name}_double_tap") or []
+            if test_action != _TEST_ACTION_NONE:
+                success = await _run_test_action(
+                    self.hass,
+                    user_input.get(test_action) or [],
+                    f"pico_link_test_{test_action}",
+                )
 
-                if hold_actions:
-                    button_hold[name] = hold_actions
+                if not success:
+                    errors["base"] = "test_action_failed"
 
-                if double_tap_actions:
-                    button_double_tap[name] = double_tap_actions
+                self._scene_hold_prefill = user_input
+            else:
+                conflicts = [
+                    name
+                    for name in SCENE_BUTTONS
+                    if user_input.get(f"{name}_hold")
+                    and user_input.get(f"{name}_double_tap")
+                ]
 
-            self._options["button_hold"] = button_hold
-            self._options["button_double_tap"] = button_double_tap
+                if conflicts:
+                    errors["base"] = "hold_and_double_tap_conflict"
+                    self._scene_hold_prefill = user_input
+                else:
+                    button_hold: dict[str, Any] = {}
+                    button_double_tap: dict[str, Any] = {}
 
-            return self._async_finish()
+                    for name in SCENE_BUTTONS:
+                        hold_actions = user_input.get(f"{name}_hold") or []
+                        double_tap_actions = user_input.get(f"{name}_double_tap") or []
+
+                        if hold_actions:
+                            button_hold[name] = hold_actions
+
+                        if double_tap_actions:
+                            button_double_tap[name] = double_tap_actions
+
+                    self._options["button_hold"] = button_hold
+                    self._options["button_double_tap"] = button_double_tap
+
+                    self._scene_hold_prefill = None
+                    return self._async_finish()
 
         return self.async_show_form(
             step_id="scene_hold_actions",
-            data_schema=_scene_hold_actions_schema(current=self._options),
+            data_schema=_scene_hold_actions_schema(
+                current=self._scene_hold_prefill or self._options,
+            ),
+            errors=errors,
         )
 
     def _async_finish(self) -> FlowResult:

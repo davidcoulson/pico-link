@@ -1,12 +1,12 @@
 # __init__.py — Integration entry point
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import EVENT_DEVICE_REGISTRY_UPDATED
@@ -14,8 +14,6 @@ from homeassistant.helpers.device_registry import EVENT_DEVICE_REGISTRY_UPDATED
 from .config import parse_pico_config
 from .const import DOMAIN
 from .controller import PicoController
-
-_LOGGER = logging.getLogger(__name__)
 
 type PicoLinkConfigEntry = ConfigEntry[list[PicoController]]
 
@@ -56,18 +54,17 @@ async def async_setup_entry(
                 device_raw,
             )
         except ValueError as err:
-            _LOGGER.error(
-                "%s: invalid configuration for entry %s (device %s): %s",
-                DOMAIN,
-                entry.entry_id,
-                device_id,
-                err,
-            )
-
             for started in controllers:
                 await started.async_stop()
 
-            return False
+            # ConfigEntryError surfaces str(err) directly on the entry
+            # (visible in the UI and via ha_get_integration's "reason"),
+            # instead of only a bare "Setup failed" that requires
+            # checking the log. Home Assistant logs the full exception
+            # itself when it catches this.
+            raise ConfigEntryError(
+                f"Invalid configuration for device {device_id}: {err}"
+            ) from err
 
         controller = PicoController(
             hass,
