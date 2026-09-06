@@ -59,6 +59,7 @@ class PicoConfig:
     light_step_pct: int = 10
     light_transition_on: int = 0
     light_transition_off: int = 0
+    light_on_off_toggle: bool = False
 
     # Media-player configuration.
     media_player_vol_step: int = 10
@@ -636,6 +637,14 @@ async def parse_pico_config(
         max_val=300,
     )
 
+    light_on_off_toggle = _normalize_bool(
+        merged.get(
+            "light_on_off_toggle",
+            False,
+        ),
+        default=False,
+    )
+
     media_player_vol_step = _normalize_int(
         merged.get(
             "media_player_vol_step",
@@ -714,6 +723,7 @@ async def parse_pico_config(
         light_step_pct=light_step_pct,
         light_transition_on=light_transition_on,
         light_transition_off=light_transition_off,
+        light_on_off_toggle=light_on_off_toggle,
         media_player_vol_step=media_player_vol_step,
         middle_button=middle_button,
         buttons=buttons,

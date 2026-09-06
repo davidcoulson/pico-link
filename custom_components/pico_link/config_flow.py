@@ -224,6 +224,16 @@ def _options_schema(
             )
         ] = _seconds()
 
+        fields[
+            vol.Optional(
+                "light_on_off_toggle",
+                default=current.get(
+                    "light_on_off_toggle",
+                    False,
+                ),
+            )
+        ] = selector.BooleanSelector()
+
     elif domain == "media_player":
         fields[
             vol.Optional(

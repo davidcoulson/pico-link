@@ -257,6 +257,39 @@ class LightActions:
             task_name,
         )
 
+    def _schedule_toggle(
+        self,
+        task_name: str = "light-toggle",
+    ) -> None:
+        """Read current state synchronously, then schedule on or off."""
+        state = self.ctrl.utils.get_entity_state()
+        is_on = bool(state) and state.state == "on"
+
+        if is_on:
+            self._schedule_turn_off(task_name)
+        else:
+            self._schedule_turn_on(task_name)
+
+    def _tap_on(
+        self,
+        task_name: str = "light-turn-on",
+    ) -> None:
+        """Resolve the ON tap action per light_on_off_toggle."""
+        if self.ctrl.conf.light_on_off_toggle:
+            self._schedule_toggle(task_name)
+        else:
+            self._schedule_turn_on(task_name)
+
+    def _tap_off(
+        self,
+        task_name: str = "light-turn-off",
+    ) -> None:
+        """Resolve the OFF tap action per light_on_off_toggle."""
+        if self.ctrl.conf.light_on_off_toggle:
+            self._schedule_toggle(task_name)
+        else:
+            self._schedule_turn_off(task_name)
+
     # =============================================================
     # PROFILE ENTRY POINTS
     # =============================================================
@@ -270,13 +303,13 @@ class LightActions:
             return
 
         self._clear_gesture()
-        self._schedule_turn_on()
+        self._tap_on()
 
     def release_on(self) -> None:
         if self._supports_onoff_hold():
             self._release_onoff_gesture(
                 "on",
-                tap_action=lambda: self._schedule_turn_on("light-on-tap"),
+                tap_action=lambda: self._tap_on("light-on-tap"),
             )
 
     def press_off(self) -> None:
@@ -288,13 +321,13 @@ class LightActions:
             return
 
         self._clear_gesture()
-        self._schedule_turn_off()
+        self._tap_off()
 
     def release_off(self) -> None:
         if self._supports_onoff_hold():
             self._release_onoff_gesture(
                 "off",
-                tap_action=lambda: self._schedule_turn_off("light-off-tap"),
+                tap_action=lambda: self._tap_off("light-off-tap"),
             )
 
     def press_stop(self) -> None:

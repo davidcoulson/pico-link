@@ -67,6 +67,7 @@
           "light_step_pct": "Step size",
           "light_transition_on": "On transition",
           "light_transition_off": "Off transition",
+          "light_on_off_toggle": "ON/OFF buttons toggle the light",
           "media_player_vol_step": "Volume step"
         }
       },

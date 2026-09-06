@@ -205,6 +205,7 @@ Every timing and domain option is configured on the **Options** step of setup
 | `light_step_pct`         | Light                |           `10` | `1–25` percent                        |
 | `light_transition_on`    | Light                |            `0` | `0–300` seconds                       |
 | `light_transition_off`   | Light                |            `0` | `0–300` seconds                       |
+| `light_on_off_toggle`    | Light                |        `false` | Boolean                               |
 | `media_player_vol_step`  | Media player         |           `10` | `1–20` percent                        |
 
 Only the fields relevant to the Pico's assigned domain are shown. Numeric
@@ -220,17 +221,17 @@ selectors are clamped to their listed range.
 
 | Gesture  | Action                    |
 | -------- | ------------------------- |
-| ON tap   | Turn on at `light_on_pct` |
+| ON tap   | Turn on at `light_on_pct` (or toggle if `light_on_off_toggle`) |
 | ON hold  | Ramp brightness upward    |
-| OFF tap  | Turn off                  |
+| OFF tap  | Turn off (or toggle if `light_on_off_toggle`) |
 | OFF hold | Ramp brightness downward  |
 
 #### 3BRL
 
 | Button | Tap                                         | Hold          |
 | ------ | -------------------------------------------- | ------------- |
-| ON     | Turn on at `light_on_pct`                   | —             |
-| OFF    | Turn off                                    | —             |
+| ON     | Turn on at `light_on_pct` (or toggle if `light_on_off_toggle`) | — |
+| OFF    | Turn off (or toggle if `light_on_off_toggle`) | —            |
 | RAISE  | Increase by `light_step_pct`                | Ramp upward   |
 | LOWER  | Decrease by `light_step_pct`                | Ramp downward |
 | STOP   | Custom STOP actions, otherwise no action    | —             |
@@ -245,6 +246,22 @@ short period instead of waiting for Home Assistant state to update.
 `light_transition_on` and `light_transition_off` apply only to ON and OFF tap
 actions. When a transition is `0`, the transition field is omitted from the
 action call. Brightness steps and ramps do not use transitions.
+
+### Light toggle mode
+
+Enabling `light_on_off_toggle` (a checkbox on the light options screen)
+changes both the ON and OFF buttons from discrete turn-on/turn-off actions
+into a toggle: each checks the light's current state and flips it. This is
+useful when one Pico controls a single light or light group and you want
+either button to work correctly regardless of which state it's currently in
+— handy in the dark, when you can't see which button is which.
+
+- P2B / 2B: tap toggles; holding still ramps in its original direction
+  (ON hold always ramps up, OFF hold always ramps down), unaffected by this
+  setting.
+- 3BRL: both ON and OFF simply toggle, since they have no hold behavior of
+  their own.
+- Off by default — existing Picos are unaffected until you turn it on.
 
 ---
 
