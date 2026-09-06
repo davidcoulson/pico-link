@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from ..const import ON_OFF_PICO_TYPES
 
 if TYPE_CHECKING:
+    from ..config import AccentPreset
     from ..controller import PicoController
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,6 +69,11 @@ class LightActions:
         # ramps do not depend on immediate Home Assistant state updates.
         self._target_brightness_pct: Optional[int] = None
         self._target_updated_at = 0.0
+
+        # Dual-light mode: which accent preset is currently showing.
+        # None means the accent light isn't (to our knowledge) active,
+        # so the next switch-to-accent starts over at preset 0.
+        self._accent_preset_index: Optional[int] = None
 
     # =============================================================
     # PROFILE HELPERS
@@ -317,18 +323,38 @@ class LightActions:
     # P2B / 2B DUAL-LIGHT MODE
     # =============================================================
 
-    def _accent_light_data(self) -> dict[str, Any]:
-        """Return the configured turn-on data for the accent light(s)."""
-        data: dict[str, Any] = {
-            "brightness_pct": self.ctrl.conf.accent_light_brightness_pct,
-        }
+    def _current_accent_preset(self) -> "AccentPreset":
+        """Return the accent preset the light is currently (or about to be) on."""
+        presets = self.ctrl.conf.accent_light_presets
+        index = self._accent_preset_index if self._accent_preset_index is not None else 0
 
-        if self.ctrl.conf.accent_light_effect:
-            data["effect"] = self.ctrl.conf.accent_light_effect
-        elif self.ctrl.conf.accent_light_color_mode == "color_temp":
-            data["color_temp_kelvin"] = self.ctrl.conf.accent_light_color_temp_kelvin
+        return presets[min(index, len(presets) - 1)]
+
+    def _advance_accent_preset(self) -> None:
+        """
+        Move to the next accent preset, or the first if switching from center.
+
+        With a single configured preset this always resolves to index 0,
+        so it's a no-op unless more than one preset is configured.
+        """
+        presets = self.ctrl.conf.accent_light_presets
+
+        if self._accent_preset_index is None:
+            self._accent_preset_index = 0
         else:
-            data["rgb_color"] = list(self.ctrl.conf.accent_light_rgb_color)
+            self._accent_preset_index = (self._accent_preset_index + 1) % len(presets)
+
+    def _accent_light_data(self) -> dict[str, Any]:
+        """Return the current accent preset's turn-on data."""
+        preset = self._current_accent_preset()
+        data: dict[str, Any] = {"brightness_pct": preset.brightness_pct}
+
+        if preset.effect:
+            data["effect"] = preset.effect
+        elif preset.color_mode == "color_temp":
+            data["color_temp_kelvin"] = preset.color_temp_kelvin
+        else:
+            data["rgb_color"] = list(preset.rgb_color)
 
         return data
 
@@ -339,6 +365,7 @@ class LightActions:
         """Set the optimistic target and schedule the switch-to-center action."""
         percentage = self.ctrl.conf.light_on_pct
         self._set_brightness_target(percentage)
+        self._accent_preset_index = None
 
         self.ctrl.create_task(
             self._switch_to_center(percentage),
@@ -349,8 +376,15 @@ class LightActions:
         self,
         task_name: str = "light-switch-accent",
     ) -> None:
-        """Discard the optimistic brightness target and switch to the accent light(s)."""
+        """
+        Discard the optimistic brightness target and switch to the accent light(s).
+
+        Advances to the next accent preset first, so repeated OFF taps
+        while the accent light is already showing cycle through
+        accent_light_presets instead of reapplying the same one.
+        """
         self._clear_brightness_target()
+        self._advance_accent_preset()
 
         self.ctrl.create_task(
             self._switch_to_accent(),
@@ -557,8 +591,10 @@ class LightActions:
             self._is_holding = True
 
             # An ON hold ramps the center light, so the accent light
-            # must not remain on at the same time.
+            # must not remain on at the same time. The next OFF should
+            # start over at the first preset, not resume mid-cycle.
             if button == "on" and self._dual_light_mode():
+                self._accent_preset_index = None
                 self.ctrl.create_task(
                     self._turn_off_accent(),
                     "light-on-hold-accent-off",
@@ -588,6 +624,7 @@ class LightActions:
                 if new_percentage == current_percentage:
                     if button == "off" and self._dual_light_mode():
                         self._clear_brightness_target()
+                        self._advance_accent_preset()
                         self.ctrl.create_task(
                             self._switch_to_accent(),
                             "light-off-hold-accent-switch",
@@ -693,3 +730,4 @@ class LightActions:
         """Cancel the active gesture and clear optimistic state."""
         self._clear_gesture()
         self._clear_brightness_target()
+        self._accent_preset_index = None

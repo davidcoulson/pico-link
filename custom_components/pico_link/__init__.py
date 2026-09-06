@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.device_registry import EVENT_DEVICE_REGISTRY_UPDATED
 
 from .config import parse_pico_config
 from .const import DOMAIN
@@ -91,8 +95,61 @@ async def async_setup_entry(
     entry.async_on_unload(unsub_stop)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    entry.async_on_unload(_watch_for_removed_devices(hass, entry))
 
     return True
+
+
+def _pico_removed_issue_id(device_id: str) -> str:
+    return f"pico_removed_{device_id}"
+
+
+def _watch_for_removed_devices(
+    hass: HomeAssistant,
+    entry: PicoLinkConfigEntry,
+) -> Callable[[], None]:
+    """
+    Raise a repair issue for any configured Pico no longer in the device registry.
+
+    Checks once immediately (catching a Pico removed while HA was
+    offline, or before this check existed) and again whenever the
+    device registry changes, so a repair issue appears if a Pico's
+    device is removed and clears itself if the device comes back.
+    """
+    device_ids = set(_entry_device_ids(entry))
+    device_registry = dr.async_get(hass)
+
+    def _check() -> None:
+        for device_id in device_ids:
+            issue_id = _pico_removed_issue_id(device_id)
+
+            if device_registry.async_get(device_id) is None:
+                ir.async_create_issue(
+                    hass,
+                    DOMAIN,
+                    issue_id,
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key="pico_removed",
+                    translation_placeholders={
+                        "title": entry.title,
+                        "device_id": device_id,
+                    },
+                )
+            else:
+                ir.async_delete_issue(hass, DOMAIN, issue_id)
+
+    _check()
+
+    @callback
+    def _handle_device_registry_updated(event: Event) -> None:
+        if event.data.get("device_id") in device_ids:
+            _check()
+
+    return hass.bus.async_listen(
+        EVENT_DEVICE_REGISTRY_UPDATED,
+        _handle_device_registry_updated,
+    )
 
 
 async def async_unload_entry(
@@ -102,6 +159,9 @@ async def async_unload_entry(
     """Unload a Pico config entry."""
     for controller in entry.runtime_data:
         await controller.async_stop()
+
+    for device_id in _entry_device_ids(entry):
+        ir.async_delete_issue(hass, DOMAIN, _pico_removed_issue_id(device_id))
 
     return True
 

@@ -6,6 +6,7 @@ from collections.abc import Callable, Coroutine
 from typing import Any, Mapping, Optional, TypeVar
 
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers import issue_registry as ir
 
 # Action modules
 from .actions.base import DomainActions
@@ -225,6 +226,7 @@ class PicoController:
                 "configured type is %s",
                 self.conf.device_id,
                 self.conf.type,
+                reason="the Lutron event did not include a recognizable hardware type",
             )
             return False
 
@@ -238,6 +240,7 @@ class PicoController:
                 self.conf.device_id,
                 raw_type,
                 self.conf.type,
+                reason=f"the bridge reported an unsupported hardware type ({raw_type!r})",
             )
             return False
 
@@ -250,21 +253,33 @@ class PicoController:
                 self.conf.type,
                 reported_type,
                 raw_type,
+                reason=f"the bridge reports {reported_type}, not {self.conf.type}",
             )
             return False
 
         # Clear a previous error after receiving a valid matching event.
+        if self._last_type_error is not None:
+            ir.async_delete_issue(
+                self.hass,
+                DOMAIN,
+                self._type_mismatch_issue_id(),
+            )
+
         self._last_type_error = None
 
         return True
+
+    def _type_mismatch_issue_id(self) -> str:
+        return f"type_mismatch_{self.conf.device_id}"
 
     def _log_type_error_once(
         self,
         error_key: str,
         message: str,
         *args: Any,
+        reason: str,
     ) -> None:
-        """Log each distinct hardware-type problem only once."""
+        """Log each distinct hardware-type problem once and raise a repair issue."""
         if self._last_type_error == error_key:
             return
 
@@ -272,6 +287,20 @@ class PicoController:
         _LOGGER.error(
             message,
             *args,
+        )
+
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self._type_mismatch_issue_id(),
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="pico_type_mismatch",
+            translation_placeholders={
+                "device_id": self.conf.device_id,
+                "configured_type": self.conf.type,
+                "reason": reason,
+            },
         )
 
     # =============================================================

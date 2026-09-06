@@ -28,7 +28,8 @@
   configured color, white temperature, effect, and brightness, instead of
   just turning one light on and off. The effect and white-temperature
   choices are picked from what the selected accent light actually supports,
-  not typed in. See [P2B and 2B dual-light mode](#p2b-and-2b-dual-light-mode).
+  not typed in, and repeated OFF taps can cycle through several saved
+  presets. See [P2B and 2B dual-light mode](#p2b-and-2b-dual-light-mode).
 - **Light on/off toggle option** — ON and OFF can each independently toggle
   a light's state instead of always issuing a discrete turn-on/turn-off.
 - **3BRL hold actions** — ON, OFF, and STOP can each run a custom action
@@ -41,6 +42,10 @@
   not just plain service calls.
 - **Calendar versioning** — releases are versioned `YYYY.MM.DD.XX` instead
   of semantic versioning. See [Versioning](#versioning).
+- **Repairs and diagnostics** — a hardware type mismatch or a Pico removed
+  from the Lutron bridge shows up under Settings → Repairs instead of only
+  the log, and every entry supports Home Assistant's standard diagnostics
+  download. See [Diagnostics and Repairs](#diagnostics-and-repairs).
 
 ---
 
@@ -245,15 +250,21 @@ Every timing and domain option is configured on the **Options** step of setup
 | `light_transition_off`   | Light                |            `0` | `0–300` seconds                       |
 | `light_on_off_toggle`    | Light                |        `false` | Boolean                               |
 | `accent_lights`          | Light (P2B, 2B)      |            `[]` | Entity list                           |
-| `accent_light_color_mode` | Light (P2B, 2B)     |           `rgb` | `rgb` or `color_temp`; only offered if the accent light supports white temperature |
-| `accent_light_rgb_color` | Light (P2B, 2B)      | `[255,255,255]` | RGB triplet                           |
-| `accent_light_color_temp_kelvin` | Light (P2B, 2B) |         `2700` | Kelvin, clamped to the accent light's supported range |
-| `accent_light_effect`    | Light (P2B, 2B)      |             `""` | Picked from the accent light's available effects; overrides color/white temperature when set |
-| `accent_light_brightness_pct` | Light (P2B, 2B) |           `100` | `1–100` percent                       |
+| `accent_light_presets`   | Light (P2B, 2B)      | one default preset | List of presets (see below); cycled through on repeated OFF taps |
 | `media_player_vol_step`  | Media player         |           `10` | `1–20` percent                        |
 
 Only the fields relevant to the Pico's assigned domain are shown. Numeric
 selectors are clamped to their listed range.
+
+Each entry in `accent_light_presets` has its own:
+
+| Field                       | Default          | Range or values                       |
+| ---------------------------- | ----------------- | -------------------------------------- |
+| `accent_light_color_mode`    | `rgb`            | `rgb` or `color_temp`; only offered if the accent light supports white temperature |
+| `accent_light_rgb_color`     | `[255,255,255]`  | RGB triplet                           |
+| `accent_light_color_temp_kelvin` | `2700`       | Kelvin, clamped to the accent light's supported range |
+| `accent_light_effect`        | `""`             | Picked from the accent light's available effects; overrides color/white temperature when set |
+| `accent_light_brightness_pct` | `100`           | `1–100` percent                       |
 
 ---
 
@@ -281,16 +292,16 @@ separate lights — for example a center fixture and a ring/edge accent light:
 | -------- | ----------------------------------------------------------------- |
 | ON tap   | Turn on `lights` at `light_on_pct`; turn off `accent_lights`       |
 | ON hold  | Ramp `lights` brightness upward; turns off `accent_lights` once the hold threshold is crossed |
-| OFF tap  | Turn on `accent_lights` at their configured color/effect and `accent_light_brightness_pct`; turn off `lights` |
-| OFF hold | Ramp `lights` brightness downward; once it bottoms out at `light_low_pct`, switches to `accent_lights` instead of just stopping |
+| OFF tap  | Turn on `accent_lights` at the current preset; turn off `lights`. A second OFF tap while the accent light is already on advances to the next preset instead of switching anything off |
+| OFF hold | Ramp `lights` brightness downward; once it bottoms out at `light_low_pct`, switches to `accent_lights` at the current preset instead of just stopping |
 
 `accent_lights` and `lights` are never on at the same time. `light_on_off_toggle`
 is ignored in this mode, since ON and OFF already mean "select center" and
 "select accent" rather than toggling a single light.
 
-The accent light's appearance is configured on a second "Accent light
-appearance" step, after the accent light(s) are selected, since the
-available choices depend on what that light supports:
+The accent light's appearance is configured on one or more "Accent light
+appearance" steps — one per preset — after the accent light(s) are selected,
+since the available choices depend on what that light supports:
 
 - **Effect** — picked from a dropdown of the first accent light's actual
   supported effects (`effect_list`), instead of typing a name. Leave it on
@@ -298,10 +309,16 @@ available choices depend on what that light supports:
   priority over both.
 - **White temperature** — only offered when the first accent light supports
   color temperature; lets you pick "Color" (RGB) or "White temperature"
-  (Kelvin, clamped to that light's supported range) as the accent light's
+  (Kelvin, clamped to that light's supported range) as the preset's
   appearance when no effect is selected.
 - **Color** — a plain RGB color, used when neither an effect nor white
   temperature is selected.
+
+Checking "Add another preset" on that step repeats it to build a list
+(`accent_light_presets`, up to 5). With only one preset, OFF always shows
+the same appearance, exactly as if presets didn't exist. With more than
+one, ON always resets back to the first preset — only repeated OFF taps
+advance through the list, wrapping back to the first after the last.
 
 #### 3BRL
 
@@ -590,6 +607,41 @@ If a Pico's configuration becomes invalid after an update (for example, an
 assigned entity was deleted), Home Assistant marks that Pico's entry as
 **Setup failed** under **Devices & Services**, with the reason in the Pico
 Link log. Other configured Picos are unaffected.
+
+---
+
+## Diagnostics and Repairs
+
+### Repairs
+
+Two problems, once detected, show up under **Settings → Repairs** instead of
+only in the log:
+
+- **Hardware type mismatch** — a configured Pico's events keep arriving with
+  a different or unrecognized hardware type. This means the physical device
+  changed, or the wrong type was configured; that Pico's events are ignored
+  until it's resolved. Clears itself automatically the next time a matching
+  event arrives.
+- **Pico removed from the bridge** — a configured Pico's device no longer
+  exists in Home Assistant's device registry (it was removed or re-paired on
+  the Lutron bridge, or someone deleted the device entry directly). Checked
+  once at startup and again on every device registry change, so it's caught
+  even if it happened while Home Assistant was offline. Clears itself if the
+  device reappears; otherwise, edit or remove the affected Pico Link entry.
+
+Neither repair is "fixable" through a guided flow — both point you at what
+to check, since the fix (correcting the configured type, or re-adding the
+Pico) happens outside Pico Link.
+
+### Diagnostics
+
+Every Pico Link entry supports Home Assistant's standard diagnostics
+download (its "⋮" menu under **Settings → Devices & Services** →
+**Download diagnostics**). The dump includes the entry's configuration and,
+for each Pico in it, its device ID, configured type, and controlled domain
+— useful for your own troubleshooting or for filing a sharper bug report.
+Nothing in it needs redacting: no credentials or personal data, just entity
+IDs, device IDs, and configuration values.
 
 ---
 

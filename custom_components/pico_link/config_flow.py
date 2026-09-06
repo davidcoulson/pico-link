@@ -286,8 +286,9 @@ def _accent_light_appearance_schema(
     effect_options: list[str] | None = None,
     supports_color_temp: bool = False,
     color_temp_range: tuple[int, int] | None = None,
+    offer_add_another: bool = False,
 ) -> vol.Schema:
-    """P2B/2B only: the accent light(s) turn-on color, effect, brightness."""
+    """P2B/2B only: one accent-light preset's color, effect, and brightness."""
     current = current or {}
     effect_options = effect_options or []
 
@@ -392,6 +393,14 @@ def _accent_light_appearance_schema(
             ),
         )
     ] = _percent(1, 100)
+
+    if offer_add_another:
+        fields[
+            vol.Optional(
+                "add_another_preset",
+                default=False,
+            )
+        ] = selector.BooleanSelector()
 
     return vol.Schema(fields)
 
@@ -684,6 +693,8 @@ class PicoLinkConfigFlow(
 class PicoLinkOptionsFlow(config_entries.OptionsFlow):
     """Handle editing an existing Pico's entities, buttons, and options."""
 
+    MAX_ACCENT_PRESETS = 5
+
     def __init__(
         self,
         config_entry: config_entries.ConfigEntry,
@@ -694,6 +705,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         self._title: str = config_entry.title
         self._domain: str = ""
         self._options: dict[str, Any] = dict(config_entry.options)
+        self._accent_presets: list[dict[str, Any]] = []
 
     async def async_step_init(
         self,
@@ -795,11 +807,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 if field != "lights":
                     for accent_field in (
                         "accent_lights",
-                        "accent_light_effect",
-                        "accent_light_color_mode",
-                        "accent_light_rgb_color",
-                        "accent_light_color_temp_kelvin",
-                        "accent_light_brightness_pct",
+                        "accent_light_presets",
                     ):
                         self._options.pop(accent_field, None)
 
@@ -856,27 +864,45 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
         """
-        Pick the accent light(s) color, effect, and brightness.
+        Pick one accent-light preset's color, effect, and brightness.
 
         A separate step from picking the entities themselves, since the
         available effect and white-temperature choices depend on which
-        light(s) were just selected there.
+        light(s) were just selected there. Checking "add another preset"
+        repeats this step to build accent_light_presets, which the
+        accent light cycles through on repeated OFF taps.
         """
         if user_input is not None:
-            self._options.update(user_input)
+            add_another = user_input.pop("add_another_preset", False)
+            self._accent_presets.append(user_input)
+
+            if add_another and len(self._accent_presets) < self.MAX_ACCENT_PRESETS:
+                return await self.async_step_accent_light_appearance()
+
+            self._options["accent_light_presets"] = self._accent_presets
             return self._async_finish()
 
         color_temp_range = self._accent_light_color_temp_range()
+        preset_number = len(self._accent_presets) + 1
 
         return self.async_show_form(
             step_id="accent_light_appearance",
             data_schema=_accent_light_appearance_schema(
-                current=self._options,
+                current=self._current_accent_preset_default(),
                 effect_options=self._accent_light_effect_options(),
                 supports_color_temp=color_temp_range is not None,
                 color_temp_range=color_temp_range,
+                offer_add_another=preset_number < self.MAX_ACCENT_PRESETS,
             ),
+            description_placeholders={"preset_number": str(preset_number)},
         )
+
+    def _current_accent_preset_default(self) -> dict[str, Any]:
+        """Prefill defaults for the preset currently being edited/added."""
+        existing = self._options.get("accent_light_presets") or []
+        index = len(self._accent_presets)
+
+        return existing[index] if index < len(existing) else {}
 
     def _accent_light_effect_options(self) -> list[str]:
         """Return the effect names supported by the first accent light."""

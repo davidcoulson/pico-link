@@ -87,14 +87,15 @@
         }
       },
       "accent_light_appearance": {
-        "title": "Accent light appearance",
-        "description": "Choose what the accent light looks like when it's switched on. Effect and white-temperature choices are read from the first accent light selected; pick 'No effect' to use the color (or white temperature) instead.",
+        "title": "Accent light appearance (preset {preset_number})",
+        "description": "Choose what the accent light looks like for this preset. Effect and white-temperature choices are read from the first accent light selected; pick 'No effect' to use the color (or white temperature) instead. Check 'Add another preset' to configure a further appearance — repeated OFF taps while the accent light is already on cycle through every preset you add, in order.",
         "data": {
           "accent_light_rgb_color": "Accent light color",
           "accent_light_color_mode": "Accent light color mode",
           "accent_light_color_temp_kelvin": "Accent light white temperature",
           "accent_light_effect": "Accent light effect",
-          "accent_light_brightness_pct": "Accent light brightness"
+          "accent_light_brightness_pct": "Accent light brightness",
+          "add_another_preset": "Add another preset"
         }
       },
       "hold_actions": {
@@ -122,6 +123,16 @@
       "single_domain_required": "Fill in exactly one of the fields above — the one domain this Pico controls — and leave the rest empty.",
       "buttons_required": "Configure at least one button with actions.",
       "at_least_one_device_required": "Select at least one Pico to keep in this entry."
+    }
+  },
+  "issues": {
+    "pico_type_mismatch": {
+      "title": "Pico hardware type mismatch",
+      "description": "Device `{device_id}` is configured in Pico Link as a `{configured_type}`, but {reason}. Its button events are being ignored until this is resolved. Confirm the Pico's type in its Pico Link entry, or remove and re-add it if the physical device changed."
+    },
+    "pico_removed": {
+      "title": "Pico removed from the Lutron bridge",
+      "description": "\"{title}\" in Pico Link references device `{device_id}`, which no longer exists in Home Assistant's device registry — it may have been removed or re-paired on the Lutron bridge. Its button presses will do nothing until this is resolved. Edit or remove this Pico Link entry to match your current hardware."
     }
   }
 }

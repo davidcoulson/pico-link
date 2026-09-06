@@ -27,6 +27,17 @@ ActionConfig = dict[str, Any]
 
 
 @dataclass
+class AccentPreset:
+    """One accent-light appearance. A Pico's accent light can cycle through several."""
+
+    effect: str = ""
+    color_mode: str = "rgb"
+    rgb_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    color_temp_kelvin: int = 2700
+    brightness_pct: int = 100
+
+
+@dataclass
 class PicoConfig:
     """Normalized configuration for one Pico remote."""
 
@@ -62,13 +73,10 @@ class PicoConfig:
 
     # P2B/2B accent light configuration. A non-empty accent_lights
     # list puts the Pico into dual-light mode: ON switches to the
-    # center light(s) in `lights`, OFF switches to these accent light(s).
+    # center light(s) in `lights`, OFF switches to these accent
+    # light(s), cycling through accent_light_presets on repeated taps.
     accent_lights: list[str] = field(default_factory=list)
-    accent_light_effect: str = ""
-    accent_light_color_mode: str = "rgb"
-    accent_light_rgb_color: list[int] = field(default_factory=lambda: [255, 255, 255])
-    accent_light_color_temp_kelvin: int = 2700
-    accent_light_brightness_pct: int = 100
+    accent_light_presets: list[AccentPreset] = field(default_factory=lambda: [AccentPreset()])
 
     # Media-player configuration.
     media_player_vol_step: int = 10
@@ -304,6 +312,57 @@ def _normalize_rgb_color(
         channels.append(channel_int)
 
     return channels
+
+
+def _normalize_accent_preset(value: Any) -> "AccentPreset":
+    """Normalize one accent-light preset entry."""
+    item = value if isinstance(value, dict) else {}
+
+    return AccentPreset(
+        effect=_normalize_effect(
+            item.get("accent_light_effect"),
+            key="accent_light_effect",
+        ),
+        color_mode=_normalize_color_mode(
+            item.get("accent_light_color_mode"),
+        ),
+        rgb_color=_normalize_rgb_color(
+            item.get("accent_light_rgb_color"),
+            key="accent_light_rgb_color",
+            default=[255, 255, 255],
+        ),
+        color_temp_kelvin=_normalize_int(
+            item.get(
+                "accent_light_color_temp_kelvin",
+                2700,
+            ),
+            default=2700,
+            min_val=1000,
+            max_val=10000,
+        ),
+        brightness_pct=_normalize_int(
+            item.get(
+                "accent_light_brightness_pct",
+                100,
+            ),
+            default=100,
+            min_val=1,
+            max_val=100,
+        ),
+    )
+
+
+def _normalize_accent_presets(value: Any) -> list["AccentPreset"]:
+    """
+    Normalize the accent light's list of cycled presets.
+
+    Falls back to a single default preset when none are configured, so
+    accent_light_presets is never empty while accent_lights is set.
+    """
+    if not isinstance(value, list) or not value:
+        return [AccentPreset()]
+
+    return [_normalize_accent_preset(item) for item in value]
 
 
 def _normalize_entities(
@@ -715,39 +774,8 @@ async def parse_pico_config(
         default=False,
     )
 
-    accent_light_effect = _normalize_effect(
-        merged.get("accent_light_effect"),
-        key="accent_light_effect",
-    )
-
-    accent_light_color_mode = _normalize_color_mode(
-        merged.get("accent_light_color_mode"),
-    )
-
-    accent_light_rgb_color = _normalize_rgb_color(
-        merged.get("accent_light_rgb_color"),
-        key="accent_light_rgb_color",
-        default=[255, 255, 255],
-    )
-
-    accent_light_color_temp_kelvin = _normalize_int(
-        merged.get(
-            "accent_light_color_temp_kelvin",
-            2700,
-        ),
-        default=2700,
-        min_val=1000,
-        max_val=10000,
-    )
-
-    accent_light_brightness_pct = _normalize_int(
-        merged.get(
-            "accent_light_brightness_pct",
-            100,
-        ),
-        default=100,
-        min_val=1,
-        max_val=100,
+    accent_light_presets = _normalize_accent_presets(
+        merged.get("accent_light_presets"),
     )
 
     media_player_vol_step = _normalize_int(
@@ -838,11 +866,7 @@ async def parse_pico_config(
         light_transition_on=light_transition_on,
         light_transition_off=light_transition_off,
         light_on_off_toggle=light_on_off_toggle,
-        accent_light_effect=accent_light_effect,
-        accent_light_color_mode=accent_light_color_mode,
-        accent_light_rgb_color=accent_light_rgb_color,
-        accent_light_color_temp_kelvin=accent_light_color_temp_kelvin,
-        accent_light_brightness_pct=accent_light_brightness_pct,
+        accent_light_presets=accent_light_presets,
         media_player_vol_step=media_player_vol_step,
         middle_button=middle_button,
         on_hold=on_hold,
