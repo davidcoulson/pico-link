@@ -97,11 +97,14 @@
           "accent_light_brightness_pct": "Accent light brightness"
         }
       },
-      "middle_button": {
-        "title": "STOP button",
-        "description": "Optional custom actions for the middle (STOP) button. Leave empty to use the default STOP behavior for this domain.",
+      "hold_actions": {
+        "title": "STOP and hold actions",
+        "description": "All optional. 'STOP actions' run on every STOP tap, replacing the default STOP behavior for this domain. The hold actions run in addition to the normal press behavior when ON, OFF, or STOP is held past the hold time — leave any of them empty to skip.",
         "data": {
-          "middle_button": "STOP actions"
+          "middle_button": "STOP actions",
+          "on_hold": "ON hold actions",
+          "off_hold": "OFF hold actions",
+          "stop_hold": "STOP hold actions"
         }
       },
       "buttons": {

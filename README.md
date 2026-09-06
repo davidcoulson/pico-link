@@ -31,6 +31,10 @@
   not typed in. See [P2B and 2B dual-light mode](#p2b-and-2b-dual-light-mode).
 - **Light on/off toggle option** — ON and OFF can each independently toggle
   a light's state instead of always issuing a discrete turn-on/turn-off.
+- **3BRL hold actions** — ON, OFF, and STOP can each run a custom action
+  sequence when held, in addition to their normal tap behavior (e.g. a tap
+  turns on one light, a hold turns on the whole room). See
+  [3BRL hold actions](#3brl-hold-actions).
 - **Custom actions run through Home Assistant's real script engine** — STOP
   buttons and 4B scene buttons support the same conditions, if-then, choose,
   repeat, and templating available in the automation editor's action picker,
@@ -185,8 +189,9 @@ only Picos of this entry's type that aren't claimed by another entry are
 offered, and at least one must remain. Non-4B entries then get the same
 entity picker used during setup (you can even switch which domain it
 controls here), followed by the timing and domain-specific
-[options](#options), and for `3BRL` Picos, a STOP-button action builder —
-none of which the initial add flow asks about, since the defaults just work.
+[options](#options), and for `3BRL` Picos, the STOP and hold actions
+builder — none of which the initial add flow asks about, since the defaults
+just work.
 4B entries get the same button-action editor used during setup. Changes take
 effect immediately and apply to every Pico in the entry; Pico Link
 automatically reloads them all.
@@ -302,11 +307,11 @@ available choices depend on what that light supports:
 
 | Button | Tap                                         | Hold          |
 | ------ | -------------------------------------------- | ------------- |
-| ON     | Turn on at `light_on_pct` (or toggle if `light_on_off_toggle`) | — |
-| OFF    | Turn off (or toggle if `light_on_off_toggle`) | —            |
+| ON     | Turn on at `light_on_pct` (or toggle if `light_on_off_toggle`) | Custom `on_hold` actions, if configured |
+| OFF    | Turn off (or toggle if `light_on_off_toggle`) | Custom `off_hold` actions, if configured |
 | RAISE  | Increase by `light_step_pct`                | Ramp upward   |
 | LOWER  | Decrease by `light_step_pct`                | Ramp downward |
-| STOP   | Custom STOP actions, otherwise no action    | —             |
+| STOP   | Custom STOP actions, otherwise no action    | Custom `stop_hold` actions, if configured |
 
 Brightness does not ramp below `light_low_pct`.
 
@@ -341,7 +346,10 @@ either button to work correctly regardless of which state it's currently in
 
 ### Fans
 
-Fan controls are always tap-only. Holding a fan button does not initiate a ramp.
+Fan controls are always tap-only. Holding ON, OFF, RAISE, or LOWER does not
+initiate a ramp. A 3BRL fan Pico can still use
+`on_hold`/`off_hold`/`stop_hold` to run custom actions when ON, OFF, or STOP
+is held; see [3BRL hold actions](#3brl-hold-actions).
 
 | Button | Action                                              |
 | ------ | ---------------------------------------------------- |
@@ -382,11 +390,11 @@ reversed.
 
 | Button | Tap                                    | Hold               |
 | ------ | ---------------------------------------- | -------------------- |
-| ON     | Open to `cover_open_pos`               | —                  |
-| OFF    | Close fully                            | —                  |
+| ON     | Open to `cover_open_pos`               | Custom `on_hold` actions, if configured |
+| OFF    | Close fully                            | Custom `off_hold` actions, if configured |
 | RAISE  | Increase position by `cover_step_pct`  | Open continuously  |
 | LOWER  | Decrease position by `cover_step_pct`  | Close continuously |
-| STOP   | Custom STOP actions, otherwise stop    | —                  |
+| STOP   | Custom STOP actions, otherwise stop    | Custom `stop_hold` actions, if configured |
 
 Rapid repeated cover taps use the most recently requested target position for a
 short period instead of waiting for `current_position` to update.
@@ -411,11 +419,11 @@ When changing direction after continuous movement, Pico Link waits for
 
 | Button | Tap                                           | Hold                      |
 | ------ | ------------------------------------------------ | --------------------------- |
-| ON     | Play or pause                                 | —                         |
-| OFF    | Next track                                    | —                         |
+| ON     | Play or pause                                 | Custom `on_hold` actions, if configured |
+| OFF    | Next track                                    | Custom `off_hold` actions, if configured |
 | RAISE  | Raise volume one step                         | Raise volume continuously |
 | LOWER  | Lower volume one step                         | Lower volume continuously |
-| STOP   | Custom STOP actions, otherwise toggle mute    | —                         |
+| STOP   | Custom STOP actions, otherwise toggle mute    | Custom `stop_hold` actions, if configured |
 
 The volume step is configured as a percentage via `media_player_vol_step`.
 Volume commands are clamped between `0.0` and `1.0`.
@@ -432,7 +440,10 @@ Volume commands are clamped between `0.0` and `1.0`.
 | RAISE  | No action                                   |
 | LOWER  | No action                                   |
 
-Switches do not support hold behavior.
+Switches have no domain-specific hold behavior — holding ON, OFF, RAISE, or
+LOWER does nothing extra by itself. A 3BRL switch Pico can still use
+`on_hold`/`off_hold`/`stop_hold` to run custom actions when ON, OFF, or STOP
+is held; see [3BRL hold actions](#3brl-hold-actions).
 
 ---
 
@@ -458,8 +469,8 @@ next one begins.
 
 ## STOP Actions and Domain Defaults
 
-Custom STOP actions are valid only for `3BRL` Picos, configured on the
-**STOP button** step.
+Custom STOP actions (`middle_button`) are valid only for `3BRL` Picos,
+configured on the **STOP and hold actions** step.
 
 Resolution order:
 
@@ -476,7 +487,19 @@ Resolution order:
 | Media player | Toggle mute            |
 | Switch       | No action              |
 
-To use the domain default, leave the STOP button step empty.
+To use the domain default, leave STOP actions empty on that step.
+
+### 3BRL hold actions
+
+`on_hold`, `off_hold`, and `stop_hold` — also configured on the **STOP and
+hold actions** step — let ON, OFF, and STOP each additionally run a custom
+action sequence when held past `hold_time_ms`. These are independent of
+each button's normal tap/press behavior (including custom STOP actions),
+which always still runs immediately on press, unchanged. Leave any of them
+empty to skip; with nothing configured, no timer is created and there's no
+behavior change from holding that button. This is how you can, for example,
+have ON turn on one light on a tap but a whole room on a hold, or have OFF
+switch to a night-light scene on a hold instead of doing nothing.
 
 ---
 

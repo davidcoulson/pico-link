@@ -396,14 +396,29 @@ def _accent_light_appearance_schema(
     return vol.Schema(fields)
 
 
-def _middle_button_schema(
-    current: list[dict[str, Any]] | None = None,
+def _hold_actions_schema(
+    current: dict[str, Any] | None = None,
 ) -> vol.Schema:
+    """3BRL only: the STOP-tap action, plus ON/OFF/STOP hold actions."""
+    current = current or {}
+
     return vol.Schema(
         {
             vol.Optional(
                 "middle_button",
-                default=list(current or []),
+                default=list(current.get("middle_button", [])),
+            ): selector.ActionSelector(),
+            vol.Optional(
+                "on_hold",
+                default=list(current.get("on_hold", [])),
+            ): selector.ActionSelector(),
+            vol.Optional(
+                "off_hold",
+                default=list(current.get("off_hold", [])),
+            ): selector.ActionSelector(),
+            vol.Optional(
+                "stop_hold",
+                default=list(current.get("stop_hold", [])),
             ): selector.ActionSelector(),
         }
     )
@@ -809,7 +824,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_accent_light()
 
             if self._type == "3BRL":
-                return await self.async_step_middle_button()
+                return await self.async_step_hold_actions()
 
             return self._async_finish()
 
@@ -918,22 +933,21 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
         return (int(min_kelvin), int(max_kelvin))
 
-    async def async_step_middle_button(
+    async def async_step_hold_actions(
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
+        """3BRL only: the STOP-tap action, plus ON/OFF/STOP hold actions."""
         if user_input is not None:
-            self._options["middle_button"] = user_input.get(
-                "middle_button",
-                [],
-            )
+            self._options["middle_button"] = user_input.get("middle_button", [])
+            self._options["on_hold"] = user_input.get("on_hold", [])
+            self._options["off_hold"] = user_input.get("off_hold", [])
+            self._options["stop_hold"] = user_input.get("stop_hold", [])
             return self._async_finish()
 
         return self.async_show_form(
-            step_id="middle_button",
-            data_schema=_middle_button_schema(
-                current=self._options.get("middle_button"),
-            ),
+            step_id="hold_actions",
+            data_schema=_hold_actions_schema(current=self._options),
         )
 
     async def async_step_buttons(

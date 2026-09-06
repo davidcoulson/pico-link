@@ -73,8 +73,13 @@ class PicoConfig:
     # Media-player configuration.
     media_player_vol_step: int = 10
 
-    # 3BRL only.
+    # 3BRL only. The button's normal tap/press behavior always still
+    # runs immediately; these additionally run when that button is
+    # held past hold_time_ms.
     middle_button: list[ActionConfig] = field(default_factory=list)
+    on_hold: list[ActionConfig] = field(default_factory=list)
+    off_hold: list[ActionConfig] = field(default_factory=list)
+    stop_hold: list[ActionConfig] = field(default_factory=list)
 
     # 4B only.
     buttons: dict[str, list[ActionConfig]] = field(default_factory=dict)
@@ -115,6 +120,12 @@ class PicoConfig:
             if self.middle_button:
                 raise ValueError(
                     f"Pico {self.device_id} (4B) cannot define 'middle_button'."
+                )
+
+            if self.on_hold or self.off_hold or self.stop_hold:
+                raise ValueError(
+                    f"Pico {self.device_id} (4B) cannot define 'on_hold', "
+                    "'off_hold', or 'stop_hold'."
                 )
 
             return
@@ -382,6 +393,39 @@ async def _validate_actions(
         )
     except (vol.Invalid, HomeAssistantError) as err:
         raise ValueError(f"{context}: {err}") from err
+
+
+async def _validate_3brl_action_field(
+    hass: HomeAssistant,
+    device_type: str,
+    raw_value: Any,
+    placeholders: dict[str, list[str]],
+    *,
+    field_name: str,
+) -> list[ActionConfig]:
+    """
+    Validate one optional 3BRL-only custom action field.
+
+    Used for middle_button (STOP tap) and on_hold/off_hold/stop_hold
+    (ON/OFF/STOP hold). Entity placeholders (e.g. "lights") are
+    expanded the same way as any other custom action field.
+    """
+    if device_type != "3BRL":
+        if raw_value not in (None, []):
+            raise ValueError(f"'{field_name}' is only valid for 3BRL Picos.")
+
+        return []
+
+    if raw_value is None:
+        return []
+
+    expanded = _expand_placeholders(raw_value, placeholders)
+
+    return await _validate_actions(
+        hass,
+        expanded,
+        context=field_name,
+    )
 
 
 async def _validate_buttons(
@@ -717,7 +761,7 @@ async def parse_pico_config(
     )
 
     # ------------------------------------------------------------
-    # MIDDLE BUTTON
+    # 3BRL CUSTOM ACTIONS: STOP TAP, AND ON/OFF/STOP HOLD
     # ------------------------------------------------------------
 
     placeholders = {
@@ -728,29 +772,37 @@ async def parse_pico_config(
         "switches": switches,
     }
 
-    raw_middle_button = device_raw.get("middle_button")
+    middle_button = await _validate_3brl_action_field(
+        hass,
+        device_type,
+        device_raw.get("middle_button"),
+        placeholders,
+        field_name="middle_button",
+    )
 
-    if device_type == "3BRL":
-        if raw_middle_button is None:
-            middle_button = []
-        else:
-            expanded_middle_button = _expand_placeholders(
-                raw_middle_button,
-                placeholders,
-            )
-            middle_button = await _validate_actions(
-                hass,
-                expanded_middle_button,
-                context="middle_button",
-            )
-    else:
-        if raw_middle_button not in (
-            None,
-            [],
-        ):
-            raise ValueError("'middle_button' is only valid for 3BRL Picos.")
+    on_hold = await _validate_3brl_action_field(
+        hass,
+        device_type,
+        device_raw.get("on_hold"),
+        placeholders,
+        field_name="on_hold",
+    )
 
-        middle_button = []
+    off_hold = await _validate_3brl_action_field(
+        hass,
+        device_type,
+        device_raw.get("off_hold"),
+        placeholders,
+        field_name="off_hold",
+    )
+
+    stop_hold = await _validate_3brl_action_field(
+        hass,
+        device_type,
+        device_raw.get("stop_hold"),
+        placeholders,
+        field_name="stop_hold",
+    )
 
     # ------------------------------------------------------------
     # 4B BUTTONS
@@ -793,6 +845,9 @@ async def parse_pico_config(
         accent_light_brightness_pct=accent_light_brightness_pct,
         media_player_vol_step=media_player_vol_step,
         middle_button=middle_button,
+        on_hold=on_hold,
+        off_hold=off_hold,
+        stop_hold=stop_hold,
         buttons=buttons,
     )
 
