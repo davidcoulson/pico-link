@@ -5,6 +5,8 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any, Optional
 
+from ..const import ON_OFF_PICO_TYPES
+
 if TYPE_CHECKING:
     from ..controller import PicoController
 
@@ -56,7 +58,7 @@ class MediaPlayerActions:
 
     def _supports_onoff_hold(self) -> bool:
         """Return True when ON/OFF must distinguish taps from holds."""
-        return self.ctrl.conf.type in ("P2B", "2B")
+        return self.ctrl.conf.type in ON_OFF_PICO_TYPES
 
     # =============================================================
     # GESTURE STATE

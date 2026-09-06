@@ -6,22 +6,12 @@ from typing import TYPE_CHECKING, Any, Optional, cast
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers.script import Script
 
-from .const import DOMAIN
+from .const import DOMAIN, DOMAIN_ENTITY_FIELDS
 
 if TYPE_CHECKING:
     from .controller import PicoController
 
 _LOGGER = logging.getLogger(__name__)
-
-# Single source of truth for the relationship between a Home Assistant
-# domain and the corresponding PicoConfig entity-list field.
-_DOMAIN_ENTITY_FIELDS = {
-    "cover": "covers",
-    "light": "lights",
-    "fan": "fans",
-    "media_player": "media_players",
-    "switch": "switches",
-}
 
 
 class SharedUtils:
@@ -47,7 +37,7 @@ class SharedUtils:
 
     def entities_for_domain(self, domain: str) -> list[str]:
         """Return all configured entities for a supported domain."""
-        field_name = _DOMAIN_ENTITY_FIELDS.get(domain)
+        field_name = DOMAIN_ENTITY_FIELDS.get(domain)
 
         if field_name is None:
             return []
@@ -59,7 +49,7 @@ class SharedUtils:
 
     def entity_domain(self) -> Optional[str]:
         """Return the single configured entity domain."""
-        for domain in _DOMAIN_ENTITY_FIELDS:
+        for domain in DOMAIN_ENTITY_FIELDS:
             if self.entities_for_domain(domain):
                 return domain
 

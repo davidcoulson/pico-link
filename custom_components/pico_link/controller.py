@@ -108,11 +108,10 @@ class PicoController:
         Home Assistant owns the task at the application level. The
         controller additionally owns it at the Pico lifecycle level.
         """
-        task = self.hass.async_create_task(target)
-
-        # Do not pass name= to async_create_task because Pico Link
-        # currently supports Home Assistant 2023.1.
-        task.set_name(f"{DOMAIN}:{self.conf.device_id}:{name}")
+        task = self.hass.async_create_task(
+            target,
+            name=f"{DOMAIN}:{self.conf.device_id}:{name}",
+        )
 
         self._tasks.add(task)
         task.add_done_callback(self._handle_task_done)

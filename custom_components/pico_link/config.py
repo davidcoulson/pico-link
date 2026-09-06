@@ -8,7 +8,6 @@ import voluptuous as vol
 from homeassistant.core import HomeAssistant, valid_entity_id
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.script import async_validate_actions_config
 
 from .const import ON_OFF_PICO_TYPES, VALID_PICO_TYPES
@@ -167,73 +166,22 @@ class PicoConfig:
 # ================================================================
 
 
-def lookup_device_id(
-    hass: HomeAssistant,
-    name: str,
-) -> str | None:
-    """Resolve a unique device by user-assigned or registry name."""
-    device_registry = dr.async_get(hass)
-
-    # Prefer the user-assigned name over the integration-provided name.
-    for attribute in (
-        "name_by_user",
-        "name",
-    ):
-        matches = [
-            device
-            for device in device_registry.devices.values()
-            if getattr(device, attribute) == name
-        ]
-
-        if len(matches) > 1:
-            raise ValueError(
-                f"Multiple devices are named {name!r}. "
-                "Configure this Pico using device_id."
-            )
-
-        if matches:
-            return matches[0].id
-
-    return None
-
-
 def _resolve_device_id(
-    hass: HomeAssistant,
     merged: dict[str, Any],
 ) -> str:
-    """Resolve the configured Pico device ID."""
+    """
+    Resolve the configured Pico device ID.
+
+    The config flow always supplies a real device ID from the device
+    registry, since it's built from a selector over Lutron's own
+    devices — there is no "name" fallback to resolve here.
+    """
     raw_device_id = merged.get("device_id")
 
-    if raw_device_id is not None:
-        if not isinstance(raw_device_id, str) or not raw_device_id.strip():
-            raise ValueError("'device_id' must be a non-empty string.")
+    if not isinstance(raw_device_id, str) or not raw_device_id.strip():
+        raise ValueError("'device_id' must be a non-empty string.")
 
-        # The Lutron event supplies the Home Assistant device ID.
-        # Do not require a particular registry identifier format.
-        return raw_device_id.strip()
-
-    raw_name = merged.get("name")
-
-    if not isinstance(raw_name, str) or not raw_name.strip():
-        raise ValueError("Device must define a non-empty 'device_id' or 'name'.")
-
-    name = raw_name.strip()
-
-    device_id = lookup_device_id(
-        hass,
-        name,
-    )
-
-    if device_id is None:
-        raise ValueError(f"No device was found with name {name!r}.")
-
-    _LOGGER.debug(
-        "Resolved device name %r to device_id %s",
-        name,
-        device_id,
-    )
-
-    return device_id
+    return raw_device_id.strip()
 
 
 # ================================================================
@@ -273,33 +221,8 @@ def _normalize_bool(
     raw_val: Any,
     default: bool = False,
 ) -> bool:
-    """Normalize a strict Boolean configuration value."""
-    if raw_val is None:
-        return default
-
-    if isinstance(raw_val, bool):
-        return raw_val
-
-    if isinstance(raw_val, str):
-        value = raw_val.strip().lower()
-
-        if value in {
-            "true",
-            "yes",
-            "on",
-            "1",
-        }:
-            return True
-
-        if value in {
-            "false",
-            "no",
-            "off",
-            "0",
-        }:
-            return False
-
-    raise ValueError(f"Expected a Boolean value, got {raw_val!r}.")
+    """Normalize a Boolean configuration value from the options selector."""
+    return raw_val if isinstance(raw_val, bool) else default
 
 
 def _normalize_effect(
@@ -567,10 +490,7 @@ async def parse_pico_config(
 
     merged = dict(device_raw)
 
-    device_id = _resolve_device_id(
-        hass,
-        merged,
-    )
+    device_id = _resolve_device_id(merged)
 
     # ------------------------------------------------------------
     # ENTITY LISTS

@@ -19,22 +19,13 @@ class Pico4ButtonScene:
     def __init__(self, controller: "PicoController") -> None:
         self._ctrl = controller
 
-        # Validate config early
-        if not isinstance(self._ctrl.conf.buttons, dict):
-            _LOGGER.error(
-                "4B device %s has invalid 'buttons' configuration (expected dict).",
-                self._ctrl.conf.device_id,
-            )
-
     # -------------------------------------------------------------
     # PRESS
     # -------------------------------------------------------------
     def handle_press(self, button: str) -> None:
+        # PicoConfig.buttons is validated when the config entry is set
+        # up, so every value here is already a well-formed action list.
         scene_map = self._ctrl.conf.buttons
-
-        if not isinstance(scene_map, dict):
-            _LOGGER.error("Pico4B: misconfigured buttons mapping (not a dict)")
-            return
 
         if button not in scene_map:
             _LOGGER.debug(
@@ -44,19 +35,8 @@ class Pico4ButtonScene:
             )
             return
 
-        actions = scene_map.get(button, [])
-
-        if not isinstance(actions, list):
-            _LOGGER.error(
-                "Pico4B: actions for button '%s' must be a list, got %s",
-                button,
-                type(actions),
-            )
-            return
-
-        # Execute each action individually
         self._ctrl.create_task(
-            self._ctrl.utils.execute_button_action(actions),
+            self._ctrl.utils.execute_button_action(scene_map[button]),
             f"4b-{button}",
         )
 
