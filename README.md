@@ -25,8 +25,10 @@
   instead of configuring each one separately.
 - **P2B/2B dual-light mode** — the ON and OFF buttons can switch between two
   separate lights (e.g. a center fixture and an edge/ring accent light) at a
-  configured color, effect, and brightness, instead of just turning one
-  light on and off. See [P2B and 2B dual-light mode](#p2b-and-2b-dual-light-mode).
+  configured color, white temperature, effect, and brightness, instead of
+  just turning one light on and off. The effect and white-temperature
+  choices are picked from what the selected accent light actually supports,
+  not typed in. See [P2B and 2B dual-light mode](#p2b-and-2b-dual-light-mode).
 - **Light on/off toggle option** — ON and OFF can each independently toggle
   a light's state instead of always issuing a discrete turn-on/turn-off.
 - **Custom actions run through Home Assistant's real script engine** — STOP
@@ -237,10 +239,12 @@ Every timing and domain option is configured on the **Options** step of setup
 | `light_transition_on`    | Light                |            `0` | `0–300` seconds                       |
 | `light_transition_off`   | Light                |            `0` | `0–300` seconds                       |
 | `light_on_off_toggle`    | Light                |        `false` | Boolean                               |
-| `edge_lights`            | Light (P2B, 2B)      |            `[]` | Entity list                           |
-| `edge_light_rgb_color`   | Light (P2B, 2B)      | `[255,255,255]` | RGB triplet                           |
-| `edge_light_effect`      | Light (P2B, 2B)      |             `""` | Effect name (overrides color)         |
-| `edge_light_brightness_pct` | Light (P2B, 2B)  |           `100` | `1–100` percent                       |
+| `accent_lights`          | Light (P2B, 2B)      |            `[]` | Entity list                           |
+| `accent_light_color_mode` | Light (P2B, 2B)     |           `rgb` | `rgb` or `color_temp`; only offered if the accent light supports white temperature |
+| `accent_light_rgb_color` | Light (P2B, 2B)      | `[255,255,255]` | RGB triplet                           |
+| `accent_light_color_temp_kelvin` | Light (P2B, 2B) |         `2700` | Kelvin, clamped to the accent light's supported range |
+| `accent_light_effect`    | Light (P2B, 2B)      |             `""` | Picked from the accent light's available effects; overrides color/white temperature when set |
+| `accent_light_brightness_pct` | Light (P2B, 2B) |           `100` | `1–100` percent                       |
 | `media_player_vol_step`  | Media player         |           `10` | `1–20` percent                        |
 
 Only the fields relevant to the Pico's assigned domain are shown. Numeric
@@ -263,22 +267,36 @@ selectors are clamped to their listed range.
 
 #### P2B and 2B dual-light mode
 
-Configuring `edge_lights` (on the "Edge/ring light" options step, shown only
+Configuring `accent_lights` (on the "Accent light" options step, shown only
 for a P2B/2B assigned to the light domain) puts it into dual-light mode.
 Instead of turning the same light on and off, ON and OFF switch between two
 separate lights — for example a center fixture and a ring/edge accent light:
 
 | Gesture  | Action                                                           |
 | -------- | ----------------------------------------------------------------- |
-| ON tap   | Turn on `lights` at `light_on_pct`; turn off `edge_lights`         |
-| ON hold  | Ramp `lights` brightness upward; turns off `edge_lights` once the hold threshold is crossed |
-| OFF tap  | Turn on `edge_lights` at `edge_light_rgb_color`/`edge_light_effect`/`edge_light_brightness_pct`; turn off `lights` |
-| OFF hold | Ramp `lights` brightness downward; once it bottoms out at `light_low_pct`, switches to `edge_lights` instead of just stopping |
+| ON tap   | Turn on `lights` at `light_on_pct`; turn off `accent_lights`       |
+| ON hold  | Ramp `lights` brightness upward; turns off `accent_lights` once the hold threshold is crossed |
+| OFF tap  | Turn on `accent_lights` at their configured color/effect and `accent_light_brightness_pct`; turn off `lights` |
+| OFF hold | Ramp `lights` brightness downward; once it bottoms out at `light_low_pct`, switches to `accent_lights` instead of just stopping |
 
-`edge_lights` and `lights` are never on at the same time. `light_on_off_toggle`
+`accent_lights` and `lights` are never on at the same time. `light_on_off_toggle`
 is ignored in this mode, since ON and OFF already mean "select center" and
-"select edge" rather than toggling a single light. If `edge_light_effect` is
-set it takes priority over `edge_light_rgb_color`.
+"select accent" rather than toggling a single light.
+
+The accent light's appearance is configured on a second "Accent light
+appearance" step, after the accent light(s) are selected, since the
+available choices depend on what that light supports:
+
+- **Effect** — picked from a dropdown of the first accent light's actual
+  supported effects (`effect_list`), instead of typing a name. Leave it on
+  "No effect" to use color or white temperature instead. When set, it takes
+  priority over both.
+- **White temperature** — only offered when the first accent light supports
+  color temperature; lets you pick "Color" (RGB) or "White temperature"
+  (Kelvin, clamped to that light's supported range) as the accent light's
+  appearance when no effect is selected.
+- **Color** — a plain RGB color, used when neither an effect nor white
+  temperature is selected.
 
 #### 3BRL
 
@@ -316,8 +334,8 @@ either button to work correctly regardless of which state it's currently in
 - 3BRL: both ON and OFF simply toggle, since they have no hold behavior of
   their own.
 - Off by default — existing Picos are unaffected until you turn it on.
-- Ignored for a P2B/2B in dual-light mode (see above) — `edge_lights` already
-  gives ON and OFF distinct, unambiguous meanings.
+- Ignored for a P2B/2B in dual-light mode (see above) — `accent_lights`
+  already gives ON and OFF distinct, unambiguous meanings.
 
 ---
 
@@ -477,7 +495,7 @@ off, but swaps them when exactly one is already on:
 ```yaml
 - if:
     - condition: state
-      entity_id: light.kitchen_edge
+      entity_id: light.kitchen_accent
       state: "on"
     - condition: state
       entity_id: light.kitchen_center
@@ -485,14 +503,14 @@ off, but swaps them when exactly one is already on:
   then:
     - action: light.turn_off
       target:
-        entity_id: light.kitchen_edge
+        entity_id: light.kitchen_accent
     - action: light.turn_on
       target:
         entity_id: light.kitchen_center
   else:
     - action: light.turn_on
       target:
-        entity_id: light.kitchen_edge
+        entity_id: light.kitchen_accent
     - action: light.turn_off
       target:
         entity_id: light.kitchen_center

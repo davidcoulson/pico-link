@@ -254,43 +254,146 @@ def _options_schema(
     return vol.Schema(fields)
 
 
-def _edge_light_schema(
+def _accent_lights_schema(
     current: dict[str, Any] | None = None,
 ) -> vol.Schema:
-    """P2B/2B only: the edge/ring light(s) and their turn-on color/effect."""
+    """P2B/2B only: the accent light entities for dual-light mode."""
     current = current or {}
 
     return vol.Schema(
         {
             vol.Optional(
-                "edge_lights",
-                default=list(current.get("edge_lights", [])),
+                "accent_lights",
+                default=list(current.get("accent_lights", [])),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(
                     domain="light",
                     multiple=True,
                 )
             ),
-            vol.Optional(
-                "edge_light_rgb_color",
-                default=current.get(
-                    "edge_light_rgb_color",
-                    [255, 255, 255],
-                ),
-            ): selector.ColorRGBSelector(),
-            vol.Optional(
-                "edge_light_effect",
-                default=current.get("edge_light_effect", ""),
-            ): selector.TextSelector(),
-            vol.Optional(
-                "edge_light_brightness_pct",
-                default=current.get(
-                    "edge_light_brightness_pct",
-                    100,
-                ),
-            ): _percent(1, 100),
         }
     )
+
+
+_NO_EFFECT = ""
+_ACCENT_COLOR_MODE_RGB = "rgb"
+_ACCENT_COLOR_MODE_TEMP = "color_temp"
+
+
+def _accent_light_appearance_schema(
+    current: dict[str, Any] | None = None,
+    *,
+    effect_options: list[str] | None = None,
+    supports_color_temp: bool = False,
+    color_temp_range: tuple[int, int] | None = None,
+) -> vol.Schema:
+    """P2B/2B only: the accent light(s) turn-on color, effect, brightness."""
+    current = current or {}
+    effect_options = effect_options or []
+
+    current_effect = current.get("accent_light_effect", _NO_EFFECT)
+
+    effect_choices = [
+        selector.SelectOptionDict(
+            value=_NO_EFFECT,
+            label="No effect (use color)",
+        ),
+        *(
+            selector.SelectOptionDict(value=effect, label=effect)
+            for effect in effect_options
+        ),
+    ]
+
+    # Keep a previously configured effect selectable even if it isn't in
+    # the current effect list (e.g. the accent light changed, or is
+    # temporarily unavailable), so editing this entry never silently
+    # discards it.
+    if current_effect != _NO_EFFECT and current_effect not in effect_options:
+        effect_choices.append(
+            selector.SelectOptionDict(
+                value=current_effect,
+                label=f"{current_effect} (not currently available)",
+            )
+        )
+
+    fields: dict[Any, Any] = {
+        vol.Optional(
+            "accent_light_rgb_color",
+            default=current.get(
+                "accent_light_rgb_color",
+                [255, 255, 255],
+            ),
+        ): selector.ColorRGBSelector(),
+    }
+
+    # Only offer a white-temperature choice when the first configured
+    # accent light actually supports it.
+    if supports_color_temp:
+        min_kelvin, max_kelvin = color_temp_range or (2000, 6535)
+
+        fields[
+            vol.Optional(
+                "accent_light_color_mode",
+                default=current.get(
+                    "accent_light_color_mode",
+                    _ACCENT_COLOR_MODE_RGB,
+                ),
+            )
+        ] = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    selector.SelectOptionDict(
+                        value=_ACCENT_COLOR_MODE_RGB,
+                        label="Color",
+                    ),
+                    selector.SelectOptionDict(
+                        value=_ACCENT_COLOR_MODE_TEMP,
+                        label="White temperature",
+                    ),
+                ],
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        )
+
+        fields[
+            vol.Optional(
+                "accent_light_color_temp_kelvin",
+                default=current.get(
+                    "accent_light_color_temp_kelvin",
+                    2700,
+                ),
+            )
+        ] = selector.ColorTempSelector(
+            selector.ColorTempSelectorConfig(
+                unit=selector.ColorTempSelectorUnit.KELVIN,
+                min=min_kelvin,
+                max=max_kelvin,
+            )
+        )
+
+    fields[
+        vol.Optional(
+            "accent_light_effect",
+            default=current_effect,
+        )
+    ] = selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=effect_choices,
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+
+    fields[
+        vol.Optional(
+            "accent_light_brightness_pct",
+            default=current.get(
+                "accent_light_brightness_pct",
+                100,
+            ),
+        )
+    ] = _percent(1, 100)
+
+    return vol.Schema(fields)
 
 
 def _middle_button_schema(
@@ -673,15 +776,17 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                     if other_field != field:
                         self._options.pop(other_field, None)
 
-                # Edge lights are only meaningful alongside the light domain.
+                # Accent lights are only meaningful alongside the light domain.
                 if field != "lights":
-                    for edge_field in (
-                        "edge_lights",
-                        "edge_light_effect",
-                        "edge_light_rgb_color",
-                        "edge_light_brightness_pct",
+                    for accent_field in (
+                        "accent_lights",
+                        "accent_light_effect",
+                        "accent_light_color_mode",
+                        "accent_light_rgb_color",
+                        "accent_light_color_temp_kelvin",
+                        "accent_light_brightness_pct",
                     ):
-                        self._options.pop(edge_field, None)
+                        self._options.pop(accent_field, None)
 
                 self._domain = domain
                 self._options[field] = user_input[field]
@@ -701,7 +806,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             self._options.update(user_input)
 
             if self._type in ON_OFF_PICO_TYPES and self._domain == "light":
-                return await self.async_step_edge_light()
+                return await self.async_step_accent_light()
 
             if self._type == "3BRL":
                 return await self.async_step_middle_button()
@@ -717,18 +822,101 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             description_placeholders={"domain": self._domain},
         )
 
-    async def async_step_edge_light(
+    async def async_step_accent_light(
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
+        """Pick the accent light entities for P2B/2B dual-light mode."""
+        if user_input is not None:
+            self._options["accent_lights"] = user_input.get("accent_lights", [])
+            return await self.async_step_accent_light_appearance()
+
+        return self.async_show_form(
+            step_id="accent_light",
+            data_schema=_accent_lights_schema(current=self._options),
+        )
+
+    async def async_step_accent_light_appearance(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """
+        Pick the accent light(s) color, effect, and brightness.
+
+        A separate step from picking the entities themselves, since the
+        available effect and white-temperature choices depend on which
+        light(s) were just selected there.
+        """
         if user_input is not None:
             self._options.update(user_input)
             return self._async_finish()
 
+        color_temp_range = self._accent_light_color_temp_range()
+
         return self.async_show_form(
-            step_id="edge_light",
-            data_schema=_edge_light_schema(current=self._options),
+            step_id="accent_light_appearance",
+            data_schema=_accent_light_appearance_schema(
+                current=self._options,
+                effect_options=self._accent_light_effect_options(),
+                supports_color_temp=color_temp_range is not None,
+                color_temp_range=color_temp_range,
+            ),
         )
+
+    def _accent_light_effect_options(self) -> list[str]:
+        """Return the effect names supported by the first accent light."""
+        accent_lights = self._options.get("accent_lights") or []
+
+        if not accent_lights:
+            return []
+
+        state = self.hass.states.get(accent_lights[0])
+
+        if not state:
+            return []
+
+        effect_list = state.attributes.get("effect_list")
+
+        if not isinstance(effect_list, list):
+            return []
+
+        return [effect for effect in effect_list if isinstance(effect, str)]
+
+    def _accent_light_color_temp_range(self) -> tuple[int, int] | None:
+        """
+        Return the first accent light's (min, max) Kelvin range.
+
+        None when there's no accent light selected yet, or the first one
+        doesn't support color temperature.
+        """
+        accent_lights = self._options.get("accent_lights") or []
+
+        if not accent_lights:
+            return None
+
+        state = self.hass.states.get(accent_lights[0])
+
+        if not state:
+            return None
+
+        supported_color_modes = state.attributes.get("supported_color_modes")
+
+        if (
+            not isinstance(supported_color_modes, list)
+            or "color_temp" not in supported_color_modes
+        ):
+            return None
+
+        min_kelvin = state.attributes.get("min_color_temp_kelvin")
+        max_kelvin = state.attributes.get("max_color_temp_kelvin")
+
+        if not isinstance(min_kelvin, (int, float)) or not isinstance(
+            max_kelvin,
+            (int, float),
+        ):
+            return (2000, 6535)
+
+        return (int(min_kelvin), int(max_kelvin))
 
     async def async_step_middle_button(
         self,

@@ -26,18 +26,18 @@ class LightActions:
         OFF tap  -> turn off
         OFF hold -> ramp brightness downward
 
-    P2B / 2B dual-light mode (edge_lights configured):
+    P2B / 2B dual-light mode (accent_lights configured):
         ON tap   -> switch to the center light(s) at light_on_pct;
-                    turn off the edge light(s)
+                    turn off the accent light(s)
         ON hold  -> ramp the center light(s) brightness upward,
-                    turning off the edge light(s) once the hold
+                    turning off the accent light(s) once the hold
                     threshold is crossed
-        OFF tap  -> switch to the edge light(s) at their configured
+        OFF tap  -> switch to the accent light(s) at their configured
                     color/effect; turn off the center light(s)
         OFF hold -> ramp the center light(s) brightness downward;
                     once it bottoms out at light_low_pct, switch to
-                    the edge light(s) instead of just stopping
-        The center and edge lights are never on at the same time.
+                    the accent light(s) instead of just stopping
+        The center and accent lights are never on at the same time.
 
     3BRL:
         ON tap      -> turn on to light_on_pct
@@ -78,8 +78,8 @@ class LightActions:
         return self.ctrl.conf.type in ON_OFF_PICO_TYPES
 
     def _dual_light_mode(self) -> bool:
-        """Return True when ON/OFF switch between center and edge lights."""
-        return bool(self.ctrl.conf.edge_lights)
+        """Return True when ON/OFF switch between center and accent lights."""
+        return bool(self.ctrl.conf.accent_lights)
 
     def _transition_data(
         self,
@@ -307,7 +307,7 @@ class LightActions:
     ) -> None:
         """Resolve the OFF tap action per dual-light mode / light_on_off_toggle."""
         if self._dual_light_mode():
-            self._schedule_switch_to_edge(task_name)
+            self._schedule_switch_to_accent(task_name)
         elif self.ctrl.conf.light_on_off_toggle:
             self._schedule_toggle(task_name)
         else:
@@ -317,16 +317,18 @@ class LightActions:
     # P2B / 2B DUAL-LIGHT MODE
     # =============================================================
 
-    def _edge_light_data(self) -> dict[str, Any]:
-        """Return the configured turn-on data for the edge light(s)."""
+    def _accent_light_data(self) -> dict[str, Any]:
+        """Return the configured turn-on data for the accent light(s)."""
         data: dict[str, Any] = {
-            "brightness_pct": self.ctrl.conf.edge_light_brightness_pct,
+            "brightness_pct": self.ctrl.conf.accent_light_brightness_pct,
         }
 
-        if self.ctrl.conf.edge_light_effect:
-            data["effect"] = self.ctrl.conf.edge_light_effect
+        if self.ctrl.conf.accent_light_effect:
+            data["effect"] = self.ctrl.conf.accent_light_effect
+        elif self.ctrl.conf.accent_light_color_mode == "color_temp":
+            data["color_temp_kelvin"] = self.ctrl.conf.accent_light_color_temp_kelvin
         else:
-            data["rgb_color"] = list(self.ctrl.conf.edge_light_rgb_color)
+            data["rgb_color"] = list(self.ctrl.conf.accent_light_rgb_color)
 
         return data
 
@@ -343,48 +345,48 @@ class LightActions:
             task_name,
         )
 
-    def _schedule_switch_to_edge(
+    def _schedule_switch_to_accent(
         self,
-        task_name: str = "light-switch-edge",
+        task_name: str = "light-switch-accent",
     ) -> None:
-        """Discard the optimistic brightness target and switch to the edge light(s)."""
+        """Discard the optimistic brightness target and switch to the accent light(s)."""
         self._clear_brightness_target()
 
         self.ctrl.create_task(
-            self._switch_to_edge(),
+            self._switch_to_accent(),
             task_name,
         )
 
     async def _switch_to_center(self, percentage: int) -> None:
-        """Turn on the center light(s) and turn off the edge light(s)."""
+        """Turn on the center light(s) and turn off the accent light(s)."""
         await asyncio.gather(
             self._turn_on(percentage),
-            self._turn_off_edge(),
+            self._turn_off_accent(),
         )
 
-    async def _switch_to_edge(self) -> None:
-        """Turn off the center light(s) and turn on the edge light(s)."""
+    async def _switch_to_accent(self) -> None:
+        """Turn off the center light(s) and turn on the accent light(s)."""
         await asyncio.gather(
             self._turn_off(),
-            self._turn_on_edge(),
+            self._turn_on_accent(),
         )
 
-    async def _turn_on_edge(self) -> None:
-        data = self._edge_light_data()
+    async def _turn_on_accent(self) -> None:
+        data = self._accent_light_data()
         data.update(self._transition_data(turning_on=True))
 
         await self.ctrl.utils.call_service_for_entities(
             "turn_on",
             data,
-            self.ctrl.conf.edge_lights,
+            self.ctrl.conf.accent_lights,
             domain="light",
         )
 
-    async def _turn_off_edge(self) -> None:
+    async def _turn_off_accent(self) -> None:
         await self.ctrl.utils.call_service_for_entities(
             "turn_off",
             self._transition_data(turning_on=False),
-            self.ctrl.conf.edge_lights,
+            self.ctrl.conf.accent_lights,
             domain="light",
         )
 
@@ -554,12 +556,12 @@ class LightActions:
 
             self._is_holding = True
 
-            # An ON hold ramps the center light, so the edge light
+            # An ON hold ramps the center light, so the accent light
             # must not remain on at the same time.
             if button == "on" and self._dual_light_mode():
                 self.ctrl.create_task(
-                    self._turn_off_edge(),
-                    "light-on-hold-edge-off",
+                    self._turn_off_accent(),
+                    "light-on-hold-accent-off",
                 )
 
             for _ in range(self.MAX_RAMP_STEPS):
@@ -581,14 +583,14 @@ class LightActions:
 
                 # Stop naturally at the configured endpoint. In
                 # dual-light mode, an OFF hold that bottoms out at
-                # light_low_pct switches over to the edge light(s)
+                # light_low_pct switches over to the accent light(s)
                 # instead of just stopping.
                 if new_percentage == current_percentage:
                     if button == "off" and self._dual_light_mode():
                         self._clear_brightness_target()
                         self.ctrl.create_task(
-                            self._switch_to_edge(),
-                            "light-off-hold-edge-switch",
+                            self._switch_to_accent(),
+                            "light-off-hold-accent-switch",
                         )
 
                     return

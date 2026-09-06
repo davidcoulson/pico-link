@@ -60,13 +60,15 @@ class PicoConfig:
     light_transition_off: int = 0
     light_on_off_toggle: bool = False
 
-    # P2B/2B edge/ring light configuration. A non-empty edge_lights
+    # P2B/2B accent light configuration. A non-empty accent_lights
     # list puts the Pico into dual-light mode: ON switches to the
-    # center light(s) in `lights`, OFF switches to these edge light(s).
-    edge_lights: list[str] = field(default_factory=list)
-    edge_light_effect: str = ""
-    edge_light_rgb_color: list[int] = field(default_factory=lambda: [255, 255, 255])
-    edge_light_brightness_pct: int = 100
+    # center light(s) in `lights`, OFF switches to these accent light(s).
+    accent_lights: list[str] = field(default_factory=list)
+    accent_light_effect: str = ""
+    accent_light_color_mode: str = "rgb"
+    accent_light_rgb_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    accent_light_color_temp_kelvin: int = 2700
+    accent_light_brightness_pct: int = 100
 
     # Media-player configuration.
     media_player_vol_step: int = 10
@@ -138,26 +140,27 @@ class PicoConfig:
                 "4B Picos."
             )
 
-        if self.edge_lights:
+        if self.accent_lights:
             if self.type not in ON_OFF_PICO_TYPES:
                 raise ValueError(
                     f"Pico {self.device_id} ({self.type}) cannot define "
-                    "'edge_lights'. Only P2B and 2B Picos support edge lights."
+                    "'accent_lights'. Only P2B and 2B Picos support "
+                    "accent lights."
                 )
 
             if not self.lights:
                 raise ValueError(
-                    f"Pico {self.device_id} defines 'edge_lights' without "
+                    f"Pico {self.device_id} defines 'accent_lights' without "
                     "'lights'. Configure the center light(s) in 'lights'."
                 )
 
-            overlap = set(self.edge_lights) & set(self.lights)
+            overlap = set(self.accent_lights) & set(self.lights)
 
             if overlap:
                 raise ValueError(
                     f"Pico {self.device_id} lists "
                     f"{', '.join(sorted(overlap))} in both 'lights' "
-                    "and 'edge_lights'."
+                    "and 'accent_lights'."
                 )
 
 
@@ -223,6 +226,22 @@ def _normalize_bool(
 ) -> bool:
     """Normalize a Boolean configuration value from the options selector."""
     return raw_val if isinstance(raw_val, bool) else default
+
+
+_VALID_ACCENT_COLOR_MODES = frozenset({"rgb", "color_temp"})
+
+
+def _normalize_color_mode(
+    raw_val: Any,
+    default: str = "rgb",
+) -> str:
+    """Normalize the accent light's rgb-vs-color-temperature selection."""
+    if not isinstance(raw_val, str):
+        return default
+
+    normalized = raw_val.strip().lower()
+
+    return normalized if normalized in _VALID_ACCENT_COLOR_MODES else default
 
 
 def _normalize_effect(
@@ -526,9 +545,9 @@ async def parse_pico_config(
         domain="switch",
     )
 
-    edge_lights = _normalize_entities(
-        merged.get("edge_lights"),
-        key="edge_lights",
+    accent_lights = _normalize_entities(
+        merged.get("accent_lights"),
+        key="accent_lights",
         domain="light",
     )
 
@@ -652,20 +671,34 @@ async def parse_pico_config(
         default=False,
     )
 
-    edge_light_effect = _normalize_effect(
-        merged.get("edge_light_effect"),
-        key="edge_light_effect",
+    accent_light_effect = _normalize_effect(
+        merged.get("accent_light_effect"),
+        key="accent_light_effect",
     )
 
-    edge_light_rgb_color = _normalize_rgb_color(
-        merged.get("edge_light_rgb_color"),
-        key="edge_light_rgb_color",
+    accent_light_color_mode = _normalize_color_mode(
+        merged.get("accent_light_color_mode"),
+    )
+
+    accent_light_rgb_color = _normalize_rgb_color(
+        merged.get("accent_light_rgb_color"),
+        key="accent_light_rgb_color",
         default=[255, 255, 255],
     )
 
-    edge_light_brightness_pct = _normalize_int(
+    accent_light_color_temp_kelvin = _normalize_int(
         merged.get(
-            "edge_light_brightness_pct",
+            "accent_light_color_temp_kelvin",
+            2700,
+        ),
+        default=2700,
+        min_val=1000,
+        max_val=10000,
+    )
+
+    accent_light_brightness_pct = _normalize_int(
+        merged.get(
+            "accent_light_brightness_pct",
             100,
         ),
         default=100,
@@ -740,7 +773,7 @@ async def parse_pico_config(
         lights=lights,
         media_players=media_players,
         switches=switches,
-        edge_lights=edge_lights,
+        accent_lights=accent_lights,
         hold_time_ms=hold_time_ms,
         step_time_ms=step_time_ms,
         cover_open_pos=cover_open_pos,
@@ -753,9 +786,11 @@ async def parse_pico_config(
         light_transition_on=light_transition_on,
         light_transition_off=light_transition_off,
         light_on_off_toggle=light_on_off_toggle,
-        edge_light_effect=edge_light_effect,
-        edge_light_rgb_color=edge_light_rgb_color,
-        edge_light_brightness_pct=edge_light_brightness_pct,
+        accent_light_effect=accent_light_effect,
+        accent_light_color_mode=accent_light_color_mode,
+        accent_light_rgb_color=accent_light_rgb_color,
+        accent_light_color_temp_kelvin=accent_light_color_temp_kelvin,
+        accent_light_brightness_pct=accent_light_brightness_pct,
         media_player_vol_step=media_player_vol_step,
         middle_button=middle_button,
         buttons=buttons,

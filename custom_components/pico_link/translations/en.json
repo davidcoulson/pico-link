@@ -79,14 +79,22 @@
           "media_player_vol_step": "Volume step"
         }
       },
-      "edge_light": {
-        "title": "Edge/ring light",
-        "description": "Optional (P2B and 2B only): pick an edge or ring light to enable dual-light mode. ON switches to the Lights configured above; OFF switches to this edge light at the color/effect below. The two are never on at the same time. Leave 'Edge lights' empty to disable dual-light mode.",
+      "accent_light": {
+        "title": "Accent light",
+        "description": "Optional (P2B and 2B only): pick an accent light (e.g. a ring or edge light) to enable dual-light mode. ON switches to the Lights configured above; OFF switches to this accent light. The two are never on at the same time. Leave empty to disable dual-light mode.",
         "data": {
-          "edge_lights": "Edge lights",
-          "edge_light_rgb_color": "Edge light color",
-          "edge_light_effect": "Edge light effect (overrides color if set)",
-          "edge_light_brightness_pct": "Edge light brightness"
+          "accent_lights": "Accent lights"
+        }
+      },
+      "accent_light_appearance": {
+        "title": "Accent light appearance",
+        "description": "Choose what the accent light looks like when it's switched on. Effect and white-temperature choices are read from the first accent light selected; pick 'No effect' to use the color (or white temperature) instead.",
+        "data": {
+          "accent_light_rgb_color": "Accent light color",
+          "accent_light_color_mode": "Accent light color mode",
+          "accent_light_color_temp_kelvin": "Accent light white temperature",
+          "accent_light_effect": "Accent light effect",
+          "accent_light_brightness_pct": "Accent light brightness"
         }
       },
       "middle_button": {
