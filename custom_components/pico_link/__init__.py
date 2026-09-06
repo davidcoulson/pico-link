@@ -28,7 +28,7 @@ async def async_setup_entry(
     }
 
     try:
-        pico_config = parse_pico_config(
+        pico_config = await parse_pico_config(
             hass,
             device_raw,
         )

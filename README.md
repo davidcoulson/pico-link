@@ -389,10 +389,52 @@ To use the domain default, leave the STOP button step empty.
 
 ---
 
+## Custom Actions: Full Home Assistant Action Support
+
+STOP-button and 4B button actions are validated and run with Home Assistant's
+own action engine — the same one behind automations and scripts — not just a
+plain list of service calls. That means the action editor's "Building
+Blocks" are available too: **If-then**, **Choose**, **Repeat**, **Wait**,
+**Delay**, and templates in service data.
+
+This makes state-dependent behavior possible without any code changes. For
+example, a STOP button that turns on only one of two lights when both are
+off, but swaps them when exactly one is already on:
+
+```yaml
+- if:
+    - condition: state
+      entity_id: light.kitchen_edge
+      state: "on"
+    - condition: state
+      entity_id: light.kitchen_center
+      state: "off"
+  then:
+    - action: light.turn_off
+      target:
+        entity_id: light.kitchen_edge
+    - action: light.turn_on
+      target:
+        entity_id: light.kitchen_center
+  else:
+    - action: light.turn_on
+      target:
+        entity_id: light.kitchen_edge
+    - action: light.turn_off
+      target:
+        entity_id: light.kitchen_center
+```
+
+Build this with **+ Add action → Building blocks → If-then** in the STOP
+button editor; conditions and both branches use the same pickers as a plain
+action.
+
+---
+
 ## Entity Placeholders
 
-Within a 3BRL STOP action or a 4B button action, these values can be used as
-a `target.entity_id`:
+Within a 3BRL STOP action, these values can be used as a `target.entity_id`
+(including inside nested if-then/choose branches):
 
 | Placeholder     | Expands to                           |
 | ----------------- | --------------------------------------- |
