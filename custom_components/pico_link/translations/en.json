@@ -71,6 +71,16 @@
           "media_player_vol_step": "Volume step"
         }
       },
+      "edge_light": {
+        "title": "Edge/ring light",
+        "description": "Optional (P2B and 2B only): pick an edge or ring light to enable dual-light mode. ON switches to the Lights configured above; OFF switches to this edge light at the color/effect below. The two are never on at the same time. Leave 'Edge lights' empty to disable dual-light mode.",
+        "data": {
+          "edge_lights": "Edge lights",
+          "edge_light_rgb_color": "Edge light color",
+          "edge_light_effect": "Edge light effect (overrides color if set)",
+          "edge_light_brightness_pct": "Edge light brightness"
+        }
+      },
       "middle_button": {
         "title": "STOP button",
         "description": "Optional custom actions for the middle (STOP) button. Leave empty to use the default STOP behavior for this domain.",

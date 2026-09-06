@@ -206,6 +206,10 @@ Every timing and domain option is configured on the **Options** step of setup
 | `light_transition_on`    | Light                |            `0` | `0–300` seconds                       |
 | `light_transition_off`   | Light                |            `0` | `0–300` seconds                       |
 | `light_on_off_toggle`    | Light                |        `false` | Boolean                               |
+| `edge_lights`            | Light (P2B, 2B)      |            `[]` | Entity list                           |
+| `edge_light_rgb_color`   | Light (P2B, 2B)      | `[255,255,255]` | RGB triplet                           |
+| `edge_light_effect`      | Light (P2B, 2B)      |             `""` | Effect name (overrides color)         |
+| `edge_light_brightness_pct` | Light (P2B, 2B)  |           `100` | `1–100` percent                       |
 | `media_player_vol_step`  | Media player         |           `10` | `1–20` percent                        |
 
 Only the fields relevant to the Pico's assigned domain are shown. Numeric
@@ -225,6 +229,25 @@ selectors are clamped to their listed range.
 | ON hold  | Ramp brightness upward    |
 | OFF tap  | Turn off (or toggle if `light_on_off_toggle`) |
 | OFF hold | Ramp brightness downward  |
+
+#### P2B and 2B dual-light mode
+
+Configuring `edge_lights` (on the "Edge/ring light" options step, shown only
+for a P2B/2B assigned to the light domain) puts it into dual-light mode.
+Instead of turning the same light on and off, ON and OFF switch between two
+separate lights — for example a center fixture and a ring/edge accent light:
+
+| Gesture  | Action                                                           |
+| -------- | ----------------------------------------------------------------- |
+| ON tap   | Turn on `lights` at `light_on_pct`; turn off `edge_lights`         |
+| ON hold  | Ramp `lights` brightness upward; turns off `edge_lights` once the hold threshold is crossed |
+| OFF tap  | Turn on `edge_lights` at `edge_light_rgb_color`/`edge_light_effect`/`edge_light_brightness_pct`; turn off `lights` |
+| OFF hold | Ramp `lights` brightness downward; once it bottoms out at `light_low_pct`, switches to `edge_lights` instead of just stopping |
+
+`edge_lights` and `lights` are never on at the same time. `light_on_off_toggle`
+is ignored in this mode, since ON and OFF already mean "select center" and
+"select edge" rather than toggling a single light. If `edge_light_effect` is
+set it takes priority over `edge_light_rgb_color`.
 
 #### 3BRL
 
@@ -262,6 +285,8 @@ either button to work correctly regardless of which state it's currently in
 - 3BRL: both ON and OFF simply toggle, since they have no hold behavior of
   their own.
 - Off by default — existing Picos are unaffected until you turn it on.
+- Ignored for a P2B/2B in dual-light mode (see above) — `edge_lights` already
+  gives ON and OFF distinct, unambiguous meanings.
 
 ---
 

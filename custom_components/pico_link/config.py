@@ -11,7 +11,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.script import async_validate_actions_config
 
-from .const import VALID_PICO_TYPES
+from .const import ON_OFF_PICO_TYPES, VALID_PICO_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,6 +60,14 @@ class PicoConfig:
     light_transition_on: int = 0
     light_transition_off: int = 0
     light_on_off_toggle: bool = False
+
+    # P2B/2B edge/ring light configuration. A non-empty edge_lights
+    # list puts the Pico into dual-light mode: ON switches to the
+    # center light(s) in `lights`, OFF switches to these edge light(s).
+    edge_lights: list[str] = field(default_factory=list)
+    edge_light_effect: str = ""
+    edge_light_rgb_color: list[int] = field(default_factory=lambda: [255, 255, 255])
+    edge_light_brightness_pct: int = 100
 
     # Media-player configuration.
     media_player_vol_step: int = 10
@@ -130,6 +138,28 @@ class PicoConfig:
                 "define 'buttons'. 'buttons' is only valid for "
                 "4B Picos."
             )
+
+        if self.edge_lights:
+            if self.type not in ON_OFF_PICO_TYPES:
+                raise ValueError(
+                    f"Pico {self.device_id} ({self.type}) cannot define "
+                    "'edge_lights'. Only P2B and 2B Picos support edge lights."
+                )
+
+            if not self.lights:
+                raise ValueError(
+                    f"Pico {self.device_id} defines 'edge_lights' without "
+                    "'lights'. Configure the center light(s) in 'lights'."
+                )
+
+            overlap = set(self.edge_lights) & set(self.lights)
+
+            if overlap:
+                raise ValueError(
+                    f"Pico {self.device_id} lists "
+                    f"{', '.join(sorted(overlap))} in both 'lights' "
+                    "and 'edge_lights'."
+                )
 
 
 # ================================================================
@@ -270,6 +300,57 @@ def _normalize_bool(
             return False
 
     raise ValueError(f"Expected a Boolean value, got {raw_val!r}.")
+
+
+def _normalize_effect(
+    value: Any,
+    *,
+    key: str,
+) -> str:
+    """Normalize an optional light effect name. Empty means "no effect"."""
+    if value is None:
+        return ""
+
+    if not isinstance(value, str):
+        raise ValueError(f"'{key}' must be a string.")
+
+    return value.strip()
+
+
+def _normalize_rgb_color(
+    value: Any,
+    *,
+    key: str,
+    default: list[int],
+) -> list[int]:
+    """Normalize an RGB color triplet, falling back to a default."""
+    if value in (
+        None,
+        "",
+        [],
+    ):
+        return list(default)
+
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValueError(f"'{key}' must be a list of three integers (0-255).")
+
+    channels: list[int] = []
+
+    for index, channel in enumerate(
+        value,
+        start=1,
+    ):
+        if isinstance(channel, bool) or not isinstance(channel, (int, float)):
+            raise ValueError(f"'{key}' channel {index} must be a number.")
+
+        channel_int = int(channel)
+
+        if not 0 <= channel_int <= 255:
+            raise ValueError(f"'{key}' channel {index} must be between 0 and 255.")
+
+        channels.append(channel_int)
+
+    return channels
 
 
 def _normalize_entities(
@@ -525,6 +606,12 @@ async def parse_pico_config(
         domain="switch",
     )
 
+    edge_lights = _normalize_entities(
+        merged.get("edge_lights"),
+        key="edge_lights",
+        domain="light",
+    )
+
     # ------------------------------------------------------------
     # TIMING AND DOMAIN OPTIONS
     # ------------------------------------------------------------
@@ -645,6 +732,27 @@ async def parse_pico_config(
         default=False,
     )
 
+    edge_light_effect = _normalize_effect(
+        merged.get("edge_light_effect"),
+        key="edge_light_effect",
+    )
+
+    edge_light_rgb_color = _normalize_rgb_color(
+        merged.get("edge_light_rgb_color"),
+        key="edge_light_rgb_color",
+        default=[255, 255, 255],
+    )
+
+    edge_light_brightness_pct = _normalize_int(
+        merged.get(
+            "edge_light_brightness_pct",
+            100,
+        ),
+        default=100,
+        min_val=1,
+        max_val=100,
+    )
+
     media_player_vol_step = _normalize_int(
         merged.get(
             "media_player_vol_step",
@@ -712,6 +820,7 @@ async def parse_pico_config(
         lights=lights,
         media_players=media_players,
         switches=switches,
+        edge_lights=edge_lights,
         hold_time_ms=hold_time_ms,
         step_time_ms=step_time_ms,
         cover_open_pos=cover_open_pos,
@@ -724,6 +833,9 @@ async def parse_pico_config(
         light_transition_on=light_transition_on,
         light_transition_off=light_transition_off,
         light_on_off_toggle=light_on_off_toggle,
+        edge_light_effect=edge_light_effect,
+        edge_light_rgb_color=edge_light_rgb_color,
+        edge_light_brightness_pct=edge_light_brightness_pct,
         media_player_vol_step=media_player_vol_step,
         middle_button=middle_button,
         buttons=buttons,

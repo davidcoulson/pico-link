@@ -6,6 +6,8 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional
 
+from ..const import ON_OFF_PICO_TYPES
+
 if TYPE_CHECKING:
     from ..controller import PicoController
 
@@ -23,6 +25,19 @@ class LightActions:
         ON hold  -> ramp brightness upward
         OFF tap  -> turn off
         OFF hold -> ramp brightness downward
+
+    P2B / 2B dual-light mode (edge_lights configured):
+        ON tap   -> switch to the center light(s) at light_on_pct;
+                    turn off the edge light(s)
+        ON hold  -> ramp the center light(s) brightness upward,
+                    turning off the edge light(s) once the hold
+                    threshold is crossed
+        OFF tap  -> switch to the edge light(s) at their configured
+                    color/effect; turn off the center light(s)
+        OFF hold -> ramp the center light(s) brightness downward;
+                    once it bottoms out at light_low_pct, switch to
+                    the edge light(s) instead of just stopping
+        The center and edge lights are never on at the same time.
 
     3BRL:
         ON tap      -> turn on to light_on_pct
@@ -60,7 +75,11 @@ class LightActions:
 
     def _supports_onoff_hold(self) -> bool:
         """Return True when ON/OFF must distinguish taps from holds."""
-        return self.ctrl.conf.type in ("P2B", "2B")
+        return self.ctrl.conf.type in ON_OFF_PICO_TYPES
+
+    def _dual_light_mode(self) -> bool:
+        """Return True when ON/OFF switch between center and edge lights."""
+        return bool(self.ctrl.conf.edge_lights)
 
     def _transition_data(
         self,
@@ -274,8 +293,10 @@ class LightActions:
         self,
         task_name: str = "light-turn-on",
     ) -> None:
-        """Resolve the ON tap action per light_on_off_toggle."""
-        if self.ctrl.conf.light_on_off_toggle:
+        """Resolve the ON tap action per dual-light mode / light_on_off_toggle."""
+        if self._dual_light_mode():
+            self._schedule_switch_to_center(task_name)
+        elif self.ctrl.conf.light_on_off_toggle:
             self._schedule_toggle(task_name)
         else:
             self._schedule_turn_on(task_name)
@@ -284,11 +305,88 @@ class LightActions:
         self,
         task_name: str = "light-turn-off",
     ) -> None:
-        """Resolve the OFF tap action per light_on_off_toggle."""
-        if self.ctrl.conf.light_on_off_toggle:
+        """Resolve the OFF tap action per dual-light mode / light_on_off_toggle."""
+        if self._dual_light_mode():
+            self._schedule_switch_to_edge(task_name)
+        elif self.ctrl.conf.light_on_off_toggle:
             self._schedule_toggle(task_name)
         else:
             self._schedule_turn_off(task_name)
+
+    # =============================================================
+    # P2B / 2B DUAL-LIGHT MODE
+    # =============================================================
+
+    def _edge_light_data(self) -> dict[str, Any]:
+        """Return the configured turn-on data for the edge light(s)."""
+        data: dict[str, Any] = {
+            "brightness_pct": self.ctrl.conf.edge_light_brightness_pct,
+        }
+
+        if self.ctrl.conf.edge_light_effect:
+            data["effect"] = self.ctrl.conf.edge_light_effect
+        else:
+            data["rgb_color"] = list(self.ctrl.conf.edge_light_rgb_color)
+
+        return data
+
+    def _schedule_switch_to_center(
+        self,
+        task_name: str = "light-switch-center",
+    ) -> None:
+        """Set the optimistic target and schedule the switch-to-center action."""
+        percentage = self.ctrl.conf.light_on_pct
+        self._set_brightness_target(percentage)
+
+        self.ctrl.create_task(
+            self._switch_to_center(percentage),
+            task_name,
+        )
+
+    def _schedule_switch_to_edge(
+        self,
+        task_name: str = "light-switch-edge",
+    ) -> None:
+        """Discard the optimistic brightness target and switch to the edge light(s)."""
+        self._clear_brightness_target()
+
+        self.ctrl.create_task(
+            self._switch_to_edge(),
+            task_name,
+        )
+
+    async def _switch_to_center(self, percentage: int) -> None:
+        """Turn on the center light(s) and turn off the edge light(s)."""
+        await asyncio.gather(
+            self._turn_on(percentage),
+            self._turn_off_edge(),
+        )
+
+    async def _switch_to_edge(self) -> None:
+        """Turn off the center light(s) and turn on the edge light(s)."""
+        await asyncio.gather(
+            self._turn_off(),
+            self._turn_on_edge(),
+        )
+
+    async def _turn_on_edge(self) -> None:
+        data = self._edge_light_data()
+        data.update(self._transition_data(turning_on=True))
+
+        await self.ctrl.utils.call_service_for_entities(
+            "turn_on",
+            data,
+            self.ctrl.conf.edge_lights,
+            domain="light",
+        )
+
+    async def _turn_off_edge(self) -> None:
+        await self.ctrl.utils.call_service_for_entities(
+            "turn_off",
+            self._transition_data(turning_on=False),
+            self.ctrl.conf.edge_lights,
+            domain="light",
+        )
 
     # =============================================================
     # PROFILE ENTRY POINTS
@@ -456,6 +554,14 @@ class LightActions:
 
             self._is_holding = True
 
+            # An ON hold ramps the center light, so the edge light
+            # must not remain on at the same time.
+            if button == "on" and self._dual_light_mode():
+                self.ctrl.create_task(
+                    self._turn_off_edge(),
+                    "light-on-hold-edge-off",
+                )
+
             for _ in range(self.MAX_RAMP_STEPS):
                 if not self._gesture_is_current(
                     button,
@@ -473,8 +579,18 @@ class LightActions:
                     direction,
                 )
 
-                # Stop naturally at the configured endpoint.
+                # Stop naturally at the configured endpoint. In
+                # dual-light mode, an OFF hold that bottoms out at
+                # light_low_pct switches over to the edge light(s)
+                # instead of just stopping.
                 if new_percentage == current_percentage:
+                    if button == "off" and self._dual_light_mode():
+                        self._clear_brightness_target()
+                        self.ctrl.create_task(
+                            self._switch_to_edge(),
+                            "light-off-hold-edge-switch",
+                        )
+
                     return
 
                 self._set_brightness_target(new_percentage)

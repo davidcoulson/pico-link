@@ -144,6 +144,27 @@ class SharedUtils:
             )
             return
 
+        await self.call_service_for_entities(
+            service,
+            data,
+            entities,
+            domain=domain,
+            blocking=blocking,
+        )
+
+    async def call_service_for_entities(
+        self,
+        service: str,
+        data: dict[str, Any],
+        entities: list[str],
+        *,
+        domain: str,
+        blocking: bool = False,
+    ) -> None:
+        """Call a service for an explicit entity list, bypassing domain lookup."""
+        if not entities:
+            return
+
         service_data = dict(data)
         service_data["entity_id"] = entities
 

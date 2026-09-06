@@ -10,7 +10,13 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import selector
 
-from .const import DOMAIN, DOMAIN_ENTITY_FIELDS, PICO_TYPE_MAP, SCENE_BUTTONS
+from .const import (
+    DOMAIN,
+    DOMAIN_ENTITY_FIELDS,
+    ON_OFF_PICO_TYPES,
+    PICO_TYPE_MAP,
+    SCENE_BUTTONS,
+)
 
 # ================================================================
 # SHARED SCHEMA BUILDERS
@@ -246,6 +252,45 @@ def _options_schema(
         ] = _percent(1, 20)
 
     return vol.Schema(fields)
+
+
+def _edge_light_schema(
+    current: dict[str, Any] | None = None,
+) -> vol.Schema:
+    """P2B/2B only: the edge/ring light(s) and their turn-on color/effect."""
+    current = current or {}
+
+    return vol.Schema(
+        {
+            vol.Optional(
+                "edge_lights",
+                default=list(current.get("edge_lights", [])),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="light",
+                    multiple=True,
+                )
+            ),
+            vol.Optional(
+                "edge_light_rgb_color",
+                default=current.get(
+                    "edge_light_rgb_color",
+                    [255, 255, 255],
+                ),
+            ): selector.ColorRGBSelector(),
+            vol.Optional(
+                "edge_light_effect",
+                default=current.get("edge_light_effect", ""),
+            ): selector.TextSelector(),
+            vol.Optional(
+                "edge_light_brightness_pct",
+                default=current.get(
+                    "edge_light_brightness_pct",
+                    100,
+                ),
+            ): _percent(1, 100),
+        }
+    )
 
 
 def _middle_button_schema(
@@ -505,6 +550,16 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                     if other_field != field:
                         self._options.pop(other_field, None)
 
+                # Edge lights are only meaningful alongside the light domain.
+                if field != "lights":
+                    for edge_field in (
+                        "edge_lights",
+                        "edge_light_effect",
+                        "edge_light_rgb_color",
+                        "edge_light_brightness_pct",
+                    ):
+                        self._options.pop(edge_field, None)
+
                 self._domain = domain
                 self._options[field] = user_input[field]
                 return await self.async_step_options()
@@ -522,6 +577,9 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             self._options.update(user_input)
 
+            if self._type in ON_OFF_PICO_TYPES and self._domain == "light":
+                return await self.async_step_edge_light()
+
             if self._type == "3BRL":
                 return await self.async_step_middle_button()
 
@@ -534,6 +592,19 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 current=self._options,
             ),
             description_placeholders={"domain": self._domain},
+        )
+
+    async def async_step_edge_light(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        if user_input is not None:
+            self._options.update(user_input)
+            return self._async_finish()
+
+        return self.async_show_form(
+            step_id="edge_light",
+            data_schema=_edge_light_schema(current=self._options),
         )
 
     async def async_step_middle_button(
