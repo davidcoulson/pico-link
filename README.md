@@ -13,10 +13,28 @@
 ---
 
 > **This is a fork of [smartqasa/pico-link](https://github.com/smartqasa/pico-link).**
-> This fork replaces YAML configuration with full setup and editing through
-> the Home Assistant UI (Settings → Devices & Services) — see
-> [Adding a Pico](#adding-a-pico) below. Development of this fork was
-> AI-assisted (Claude).
+> Development of this fork was AI-assisted (Claude).
+
+### Changes in This Fork
+
+- **UI-only configuration** — every Pico is added, edited, and removed from
+  **Settings → Devices & Services**; YAML configuration has been removed
+  entirely. See [Adding a Pico](#adding-a-pico).
+- **Multi-Pico config entries** — group several identical Picos (e.g.
+  multiple stairway remotes) under one shared, editable configuration
+  instead of configuring each one separately.
+- **P2B/2B dual-light mode** — the ON and OFF buttons can switch between two
+  separate lights (e.g. a center fixture and an edge/ring accent light) at a
+  configured color, effect, and brightness, instead of just turning one
+  light on and off. See [P2B and 2B dual-light mode](#p2b-and-2b-dual-light-mode).
+- **Light on/off toggle option** — ON and OFF can each independently toggle
+  a light's state instead of always issuing a discrete turn-on/turn-off.
+- **Custom actions run through Home Assistant's real script engine** — STOP
+  buttons and 4B scene buttons support the same conditions, if-then, choose,
+  repeat, and templating available in the automation editor's action picker,
+  not just plain service calls.
+- **Calendar versioning** — releases are versioned `YYYY.MM.DD.XX` instead
+  of semantic versioning. See [Versioning](#versioning).
 
 ---
 
