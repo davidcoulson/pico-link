@@ -569,7 +569,7 @@ def _light_preset_appearance_schema(
             "light_preset_rgb_color",
             default=current.get(
                 "light_preset_rgb_color",
-                [255, 255, 255],
+                _DEFAULT_PRESET_RGB_COLOR,
             ),
         )
     ] = selector.ColorRGBSelector()
