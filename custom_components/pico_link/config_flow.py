@@ -67,7 +67,7 @@ def _percent(
             min=min_val,
             max=max_val,
             step=1,
-            mode=selector.NumberSelectorMode.BOX,
+            mode=selector.NumberSelectorMode.SLIDER,
             unit_of_measurement="%",
         )
     )
@@ -79,7 +79,7 @@ def _milliseconds() -> selector.NumberSelector:
             min=100,
             max=2000,
             step=50,
-            mode=selector.NumberSelectorMode.BOX,
+            mode=selector.NumberSelectorMode.SLIDER,
             unit_of_measurement="ms",
         )
     )
@@ -91,7 +91,7 @@ def _seconds() -> selector.NumberSelector:
             min=0,
             max=300,
             step=1,
-            mode=selector.NumberSelectorMode.BOX,
+            mode=selector.NumberSelectorMode.SLIDER,
             unit_of_measurement="s",
         )
     )
@@ -310,6 +310,11 @@ _NO_EFFECT = ""
 _ACCENT_COLOR_MODE_RGB = "rgb"
 _ACCENT_COLOR_MODE_TEMP = "color_temp"
 
+# A visibly non-white default for a fresh preset's color swatch — plain
+# white renders indistinguishably from an empty field against the
+# dialog's own white background.
+_DEFAULT_PRESET_RGB_COLOR = [255, 166, 0]
+
 
 def _accent_preview_service_data(user_input: dict[str, Any]) -> dict[str, Any]:
     """
@@ -335,7 +340,7 @@ def _accent_preview_service_data(user_input: dict[str, Any]) -> dict[str, Any]:
     else:
         data["rgb_color"] = user_input.get(
             "accent_light_rgb_color",
-            [255, 255, 255],
+            _DEFAULT_PRESET_RGB_COLOR,
         )
 
     return data
@@ -384,7 +389,7 @@ def _accent_light_appearance_schema(
             "accent_light_rgb_color",
             default=current.get(
                 "accent_light_rgb_color",
-                [255, 255, 255],
+                _DEFAULT_PRESET_RGB_COLOR,
             ),
         ): selector.ColorRGBSelector(),
     }
@@ -500,7 +505,7 @@ def _light_preview_service_data(user_input: dict[str, Any]) -> dict[str, Any]:
     else:
         data["rgb_color"] = user_input.get(
             "light_preset_rgb_color",
-            [255, 255, 255],
+            _DEFAULT_PRESET_RGB_COLOR,
         )
 
     return data

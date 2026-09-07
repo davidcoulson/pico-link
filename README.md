@@ -64,6 +64,10 @@
   cycle a light through several saved appearances instead of doing nothing,
   using the same preset editor (with live preview) as dual-light mode. See
   [STOP light-preset cycling](#stop-light-preset-cycling).
+- **UI polish** — brightness, timing, and other percentage/duration fields
+  now use Home Assistant's slider control instead of a plain number box,
+  and a fresh color preset defaults to a visibly non-white color instead
+  of one that looks blank against the dialog background.
 
 ---
 
