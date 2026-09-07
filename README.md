@@ -68,6 +68,11 @@
   now use Home Assistant's slider control instead of a plain number box,
   and a fresh color preset defaults to a visibly non-white color instead
   of one that looks blank against the dialog background.
+- **Clearer multi-step setup/editing** — each step's button now reads
+  "Next" instead of "Submit" whenever more steps follow, and a non-4B
+  entry's controlled entities are appended to its title on the plain
+  integration list, since it otherwise gives no hint what an entry
+  controls. See [Editing a Pico](#editing-a-pico).
 
 ---
 
@@ -222,6 +227,18 @@ work.
 4B entries get the same button-action editor used during setup. Changes take
 effect immediately and apply to every Pico in the entry; Pico Link
 automatically reloads them all.
+
+Non-4B entries (and new ones from setup) also get their controlled
+entities appended to the entry's title on the plain **Settings → Devices
+& Services → Pico Link** list — for example "Kitchen Pico — Kitchen
+Lumary" instead of just "Kitchen Pico" — since that list otherwise gives
+no hint of what an entry actually controls. This updates whenever the
+entities step is submitted (including as part of any other edit), not
+retroactively for entries you don't reopen.
+
+Each step's button reads "Next" instead of "Submit" whenever more steps
+follow, so it's clear before you click whether you're finishing this
+Pico's configuration or continuing to another screen.
 
 Each Pico's underlying device and its type are fixed (since the type is read
 from the hardware, there's nothing to change there anyway) — a Pico can't

@@ -811,6 +811,37 @@ def _scene_hold_actions_schema(
     return vol.Schema(fields)
 
 
+_MAX_TITLE_ENTITIES = 3
+
+
+def _title_with_entities(
+    base_title: str,
+    entity_ids: list[str],
+    hass: Any,
+) -> str:
+    """
+    Append a short summary of the controlled entities to a Pico's title.
+
+    Shows up on the plain integration-entries list (Settings -> Devices &
+    Services -> Pico Link), which otherwise only shows the Pico name(s)
+    with no hint of what they actually control. Uses each entity's
+    friendly name when known, falling back to its entity ID.
+    """
+    if not entity_ids:
+        return base_title
+
+    names = [
+        state.name if (state := hass.states.get(entity_id)) else entity_id
+        for entity_id in entity_ids[:_MAX_TITLE_ENTITIES]
+    ]
+    summary = ", ".join(names)
+
+    if len(entity_ids) > _MAX_TITLE_ENTITIES:
+        summary += f", +{len(entity_ids) - _MAX_TITLE_ENTITIES} more"
+
+    return f"{base_title} — {summary}"
+
+
 def _entry_device_ids(
     entry_data: Mapping[str, Any],
 ) -> list[str]:
@@ -977,6 +1008,7 @@ class PicoLinkConfigFlow(
             step_id="user",
             data_schema=schema,
             errors=errors,
+            last_step=False,
         )
 
     async def async_step_entities(
@@ -994,12 +1026,18 @@ class PicoLinkConfigFlow(
                 domain, field = chosen
                 self._domain = domain
                 self._options = {field: user_input[field]}
+                self._title = _title_with_entities(
+                    self._title,
+                    user_input[field],
+                    self.hass,
+                )
                 return self._async_finish()
 
         return self.async_show_form(
             step_id="entities",
             data_schema=_entities_schema(),
             errors=errors,
+            last_step=True,
         )
 
     async def async_step_buttons(
@@ -1023,6 +1061,7 @@ class PicoLinkConfigFlow(
             step_id="buttons",
             data_schema=_buttons_schema(),
             errors=errors,
+            last_step=True,
         )
 
     def _async_finish(self) -> FlowResult:
@@ -1151,6 +1190,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             data_schema=schema,
             errors=errors,
             description_placeholders={"pico_type": self._type},
+            last_step=False,
         )
 
     async def async_step_entities(
@@ -1182,12 +1222,18 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
                 self._domain = domain
                 self._options[field] = user_input[field]
+                self._title = _title_with_entities(
+                    self._title,
+                    user_input[field],
+                    self.hass,
+                )
                 return await self.async_step_options()
 
         return self.async_show_form(
             step_id="entities",
             data_schema=_entities_schema(current=self._options),
             errors=errors,
+            last_step=False,
         )
 
     async def async_step_options(
@@ -1212,6 +1258,11 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 current=self._options,
             ),
             description_placeholders={"domain": self._domain},
+            # Mirrors the branching just above: 3BRL always continues to
+            # accent_light or custom_actions, and light-domain P2B/2B
+            # always continues to accent_light — every other case
+            # finishes here.
+            last_step=self._type != "3BRL" and self._domain != "light",
         )
 
     async def async_step_accent_light(
@@ -1254,6 +1305,9 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             step_id="accent_light",
             data_schema=_accent_lights_schema(current=current),
             errors=errors,
+            # Whether this is the last step depends on what's picked here
+            # (dual-light mode vs. not), which isn't known yet.
+            last_step=False,
         )
 
     async def async_step_accent_light_appearance(
@@ -1305,6 +1359,8 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         color_temp_range = self._accent_light_color_temp_range()
         preset_number = len(self._accent_presets) + 1
 
+        offer_add_another = preset_number < self.MAX_ACCENT_PRESETS
+
         return self.async_show_form(
             step_id="accent_light_appearance",
             data_schema=_accent_light_appearance_schema(
@@ -1312,10 +1368,15 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 effect_options=self._accent_light_effect_options(),
                 supports_color_temp=color_temp_range is not None,
                 color_temp_range=color_temp_range,
-                offer_add_another=preset_number < self.MAX_ACCENT_PRESETS,
+                offer_add_another=offer_add_another,
                 offer_remove=self._accent_preset_read_index < len(existing),
             ),
             description_placeholders={"preset_number": str(preset_number)},
+            # A 3BRL always continues to custom_actions after presets are
+            # done; P2B/2B finishes here only once "add another" is no
+            # longer offered (at MAX_ACCENT_PRESETS) — otherwise it's the
+            # user's choice on this very submission, so not knowable yet.
+            last_step=self._type != "3BRL" and not offer_add_another,
         )
 
     def _current_accent_preset_default(self) -> dict[str, Any]:
@@ -1461,6 +1522,9 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 enable_default=bool(existing),
             ),
             description_placeholders={"preset_number": str(preset_number)},
+            # Every path out of this step leads to custom_actions next,
+            # whether the feature ends up enabled or not.
+            last_step=False,
         )
 
     def _current_light_preset_default(self) -> dict[str, Any]:
@@ -1603,6 +1667,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 current=self._custom_actions_prefill or self._options,
             ),
             errors=errors,
+            last_step=True,
         )
 
     async def async_step_buttons(
@@ -1628,6 +1693,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 current=self._options.get("buttons"),
             ),
             errors=errors,
+            last_step=False,
         )
 
     async def async_step_scene_hold_actions(
@@ -1688,6 +1754,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 current=self._scene_hold_prefill or self._options,
             ),
             errors=errors,
+            last_step=True,
         )
 
     def _async_finish(self) -> FlowResult:
