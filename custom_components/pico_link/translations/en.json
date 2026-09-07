@@ -104,7 +104,7 @@
       },
       "accent_light_appearance": {
         "title": "Accent light appearance (preset {preset_number})",
-        "description": "Choose what the accent light looks like for this preset. Effect and white-temperature choices are read from the first accent light selected; pick 'No effect' to use the color (or white temperature) instead. Check 'Try it' to turn the accent light(s) on with what's filled in now, without leaving this step. Check 'Add another preset' to configure a further appearance — repeated OFF taps while the accent light is already on cycle through every preset you add, in order.",
+        "description": "Choose what the accent light looks like for this preset. Effect and white-temperature choices are read from the first accent light selected; pick 'No effect' to use the color (or white temperature) instead. Check 'Try it' to turn the accent light(s) on with what's filled in now, without leaving this step. Check 'Remove this preset' (shown only for a preset that already exists) to drop it instead of keeping it. Check 'Add another preset' to configure a further appearance — repeated OFF taps while the accent light is already on cycle through every preset you add, in order.",
         "data": {
           "accent_light_rgb_color": "Accent light color",
           "accent_light_color_mode": "Accent light color mode",
@@ -112,6 +112,7 @@
           "accent_light_effect": "Accent light effect",
           "accent_light_brightness_pct": "Accent light brightness",
           "preview_this_preset": "Try it",
+          "remove_this_preset": "Remove this preset",
           "add_another_preset": "Add another preset"
         }
       },
@@ -160,7 +161,8 @@
       "buttons_required": "Configure at least one button with actions.",
       "at_least_one_device_required": "Select at least one Pico to keep in this entry.",
       "hold_and_double_tap_conflict": "A button can use hold actions or double-tap actions, not both — remove one before continuing.",
-      "test_action_failed": "The test action failed to run. Check the log for details; your other entries here were kept."
+      "test_action_failed": "The test action failed to run. Check the log for details; your other entries here were kept.",
+      "accent_light_overlap": "An accent light can't also be one of the lights configured above — pick a different accent light, or remove it from the Lights step."
     }
   },
   "issues": {
@@ -171,6 +173,10 @@
     "pico_removed": {
       "title": "Pico removed from the Lutron bridge",
       "description": "\"{title}\" in Pico Link references device `{device_id}`, which no longer exists in Home Assistant's device registry — it may have been removed or re-paired on the Lutron bridge. Its button presses will do nothing until this is resolved. Edit or remove this Pico Link entry to match your current hardware."
+    },
+    "pico_entity_missing": {
+      "title": "Pico Link entity no longer exists",
+      "description": "\"{title}\" in Pico Link references {entities}, which no longer exist in Home Assistant's entity registry — they may have been deleted or renamed. Button presses that target them will do nothing until this is resolved. Edit this Pico Link entry to point at the correct entities."
     }
   }
 }

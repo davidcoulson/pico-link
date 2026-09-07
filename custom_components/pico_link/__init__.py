@@ -4,12 +4,14 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import EVENT_DEVICE_REGISTRY_UPDATED
+from homeassistant.helpers.entity_registry import EVENT_ENTITY_REGISTRY_UPDATED
 
 from .config import parse_pico_config
 from .const import DOMAIN
@@ -32,6 +34,29 @@ def _entry_device_ids(entry: PicoLinkConfigEntry) -> list[str]:
         return device_ids
 
     return [entry.data["device_id"]]
+
+
+_ENTITY_FIELDS = (
+    "covers",
+    "fans",
+    "lights",
+    "media_players",
+    "switches",
+    "accent_lights",
+)
+
+
+def _entry_entity_ids(entry: PicoLinkConfigEntry) -> list[str]:
+    """Return every entity ID configured in a Pico Link entry's options."""
+    entity_ids: list[str] = []
+
+    for field in _ENTITY_FIELDS:
+        value = entry.options.get(field)
+
+        if isinstance(value, list):
+            entity_ids.extend(value)
+
+    return entity_ids
 
 
 async def async_setup_entry(
@@ -93,6 +118,7 @@ async def async_setup_entry(
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     entry.async_on_unload(_watch_for_removed_devices(hass, entry))
+    entry.async_on_unload(_watch_for_missing_entities(hass, entry))
 
     return True
 
@@ -149,6 +175,76 @@ def _watch_for_removed_devices(
     )
 
 
+def _pico_entity_missing_issue_id(entry_id: str) -> str:
+    return f"pico_entity_missing_{entry_id}"
+
+
+def _watch_for_missing_entities(
+    hass: HomeAssistant,
+    entry: PicoLinkConfigEntry,
+) -> Callable[[], None]:
+    """
+    Raise a repair issue for any configured entity no longer in the entity registry.
+
+    A deleted or renamed light/cover/fan/media player/switch (including
+    an accent light) otherwise fails silently — the service call this
+    entry's Picos make against it just does nothing. The initial check
+    waits for Home Assistant to finish starting so slower-loading
+    integrations aren't flagged as "missing" before they've registered
+    their entities; it runs immediately for an entry set up (or reloaded)
+    after that, and again whenever the entity registry changes.
+    """
+    tracked = set(_entry_entity_ids(entry))
+    issue_id = _pico_entity_missing_issue_id(entry.entry_id)
+
+    if not tracked:
+        return lambda: None
+
+    entity_registry = er.async_get(hass)
+
+    def _check() -> None:
+        missing = sorted(
+            entity_id for entity_id in tracked if entity_registry.async_get(entity_id) is None
+        )
+
+        if missing:
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="pico_entity_missing",
+                translation_placeholders={
+                    "title": entry.title,
+                    "entities": ", ".join(missing),
+                },
+            )
+        else:
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+
+    if hass.is_running:
+        _check()
+    else:
+        hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED,
+            lambda _event: _check(),
+        )
+
+    @callback
+    def _handle_entity_registry_updated(event: Event) -> None:
+        if (
+            event.data.get("entity_id") in tracked
+            or event.data.get("old_entity_id") in tracked
+        ):
+            _check()
+
+    return hass.bus.async_listen(
+        EVENT_ENTITY_REGISTRY_UPDATED,
+        _handle_entity_registry_updated,
+    )
+
+
 async def async_unload_entry(
     hass: HomeAssistant,
     entry: PicoLinkConfigEntry,
@@ -159,6 +255,8 @@ async def async_unload_entry(
 
     for device_id in _entry_device_ids(entry):
         ir.async_delete_issue(hass, DOMAIN, _pico_removed_issue_id(device_id))
+
+    ir.async_delete_issue(hass, DOMAIN, _pico_entity_missing_issue_id(entry.entry_id))
 
     return True
 

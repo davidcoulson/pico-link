@@ -51,10 +51,15 @@
   not just plain service calls.
 - **Calendar versioning** — releases are versioned `YYYY.MM.DD.XX` instead
   of semantic versioning. See [Versioning](#versioning).
-- **Repairs and diagnostics** — a hardware type mismatch or a Pico removed
-  from the Lutron bridge shows up under Settings → Repairs instead of only
-  the log, and every entry supports Home Assistant's standard diagnostics
-  download. See [Diagnostics and Repairs](#diagnostics-and-repairs).
+- **Repairs and diagnostics** — a hardware type mismatch, a Pico removed
+  from the Lutron bridge, or a configured entity that no longer exists shows
+  up under Settings → Repairs instead of only the log, and every entry
+  supports Home Assistant's standard diagnostics download. See
+  [Diagnostics and Repairs](#diagnostics-and-repairs).
+- **Raising from off respects `light_low_pct`** — a single RAISE (3BRL) or
+  ON hold (P2B/2B) on a light that's off now lands at `light_low_pct`
+  instead of a single `light_step_pct`, matching how a native Lutron dimmer
+  behaves.
 
 ---
 
@@ -300,9 +305,11 @@ Each entry in `accent_light_presets` has its own:
 | LOWER  | Decrease by `light_step_pct`                | Ramp downward (no hold/double-tap actions apply here) |
 | STOP   | Custom STOP actions, otherwise no action    | Custom `stop_hold` or `stop_double_tap` actions |
 
-Brightness does not ramp below `light_low_pct`. See
-[3BRL custom actions](#3brl-custom-actions) for how hold and double-tap
-actions work.
+Brightness does not ramp below `light_low_pct`, and raising a light that's
+off — a single RAISE tap, or a P2B/2B ON hold — lands at `light_low_pct`
+rather than a single `light_step_pct`, matching native Lutron dimmer
+behavior. See [3BRL custom actions](#3brl-custom-actions) for how hold and
+double-tap actions work.
 
 #### Dual-light mode
 
@@ -356,6 +363,11 @@ Checking "Add another preset" on that step repeats it to build a list
 the same appearance, exactly as if presets didn't exist. With more than
 one, ON always resets back to the first preset — only repeated OFF taps
 advance through the list, wrapping back to the first after the last.
+
+When editing an entry that already has more than one preset, each existing
+preset's step also offers "Remove this preset" — checking it drops that
+preset and shifts any later ones up, so a list can be shrunk without
+clearing `accent_lights` and rebuilding dual-light mode from scratch.
 
 Rapid repeated brightness taps use the most recently requested brightness for a
 short period instead of waiting for Home Assistant state to update.
@@ -689,10 +701,17 @@ only in the log:
   once at startup and again on every device registry change, so it's caught
   even if it happened while Home Assistant was offline. Clears itself if the
   device reappears; otherwise, edit or remove the affected Pico Link entry.
+- **A configured entity no longer exists** — a light, cover, fan, media
+  player, switch, or accent light assigned to a Pico was deleted or renamed.
+  Button presses that target it otherwise fail silently. Checked once Home
+  Assistant has finished starting (so a slower-loading integration isn't
+  flagged before it's registered its entities) and again on every entity
+  registry change; clears itself once every listed entity exists again.
 
-Neither repair is "fixable" through a guided flow — both point you at what
-to check, since the fix (correcting the configured type, or re-adding the
-Pico) happens outside Pico Link.
+None of these repairs are "fixable" through a guided flow — each points you
+at what to check, since the fix (correcting the configured type, re-adding
+the Pico, or pointing the entry at the right entities) happens outside Pico
+Link.
 
 ### Diagnostics
 

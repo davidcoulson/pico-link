@@ -247,6 +247,14 @@ class LightActions:
                 self.ctrl.conf.light_low_pct,
                 new_percentage,
             )
+        elif current_percentage == 0:
+            # RAISE (or an ON hold ramp) from off should land at least at
+            # light_low_pct, matching native Lutron dimmer behavior,
+            # instead of a single light_step_pct.
+            new_percentage = max(
+                self.ctrl.conf.light_low_pct,
+                new_percentage,
+            )
 
         return max(
             1,

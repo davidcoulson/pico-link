@@ -348,6 +348,7 @@ def _accent_light_appearance_schema(
     supports_color_temp: bool = False,
     color_temp_range: tuple[int, int] | None = None,
     offer_add_another: bool = False,
+    offer_remove: bool = False,
 ) -> vol.Schema:
     """P2B/2B/3BRL only: one accent-light preset's color, effect, and brightness."""
     current = current or {}
@@ -461,6 +462,14 @@ def _accent_light_appearance_schema(
             default=False,
         )
     ] = selector.BooleanSelector()
+
+    if offer_remove:
+        fields[
+            vol.Optional(
+                "remove_this_preset",
+                default=False,
+            )
+        ] = selector.BooleanSelector()
 
     if offer_add_another:
         fields[
@@ -1023,13 +1032,24 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
         """Pick the accent light entities for dual-light mode."""
+        errors: dict[str, str] = {}
+        current = self._options
+
         if user_input is not None:
-            self._options["accent_lights"] = user_input.get("accent_lights", [])
-            return await self.async_step_accent_light_appearance()
+            accent_lights = user_input.get("accent_lights", [])
+            overlap = set(accent_lights) & set(self._options.get("lights", []))
+
+            if overlap:
+                errors["base"] = "accent_light_overlap"
+                current = {**self._options, "accent_lights": accent_lights}
+            else:
+                self._options["accent_lights"] = accent_lights
+                return await self.async_step_accent_light_appearance()
 
         return self.async_show_form(
             step_id="accent_light",
-            data_schema=_accent_lights_schema(current=self._options),
+            data_schema=_accent_lights_schema(current=current),
+            errors=errors,
         )
 
     async def async_step_accent_light_appearance(
@@ -1046,8 +1066,12 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         accent light cycles through on repeated OFF taps. Checking
         "Try it" turns the accent light(s) on with whatever's currently
         filled in and re-shows this same step, so a preset can be
-        checked by eye before moving on.
+        checked by eye before moving on. Checking "Remove this preset"
+        (only offered for a preset that already exists) drops it instead
+        of keeping it, shifting any later presets up by one.
         """
+        existing = self._options.get("accent_light_presets") or []
+
         if user_input is not None:
             if user_input.pop("preview_this_preset", False):
                 await self._preview_accent_preset(user_input)
@@ -1055,6 +1079,10 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_accent_light_appearance()
 
             self._preview_prefill = None
+
+            if user_input.pop("remove_this_preset", False):
+                return await self.async_step_accent_light_appearance()
+
             add_another = user_input.pop("add_another_preset", False)
             self._accent_presets.append(user_input)
 
@@ -1069,7 +1097,8 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             return self._async_finish()
 
         color_temp_range = self._accent_light_color_temp_range()
-        preset_number = len(self._accent_presets) + 1
+        index = len(self._accent_presets)
+        preset_number = index + 1
 
         return self.async_show_form(
             step_id="accent_light_appearance",
@@ -1079,6 +1108,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 supports_color_temp=color_temp_range is not None,
                 color_temp_range=color_temp_range,
                 offer_add_another=preset_number < self.MAX_ACCENT_PRESETS,
+                offer_remove=index < len(existing),
             ),
             description_placeholders={"preset_number": str(preset_number)},
         )
