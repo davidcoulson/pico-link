@@ -47,7 +47,9 @@ class LightActions:
         RAISE hold  -> ramp brightness upward
         LOWER tap   -> one brightness step down
         LOWER hold  -> ramp brightness downward
-        STOP tap    -> execute middle_button actions, otherwise no-op
+        STOP tap    -> execute middle_button actions; otherwise, if
+                       light_presets is configured, cycle `lights`
+                       through it instead; otherwise no-op
     """
 
     MAX_RAMP_STEPS = 50
@@ -74,6 +76,11 @@ class LightActions:
         # None means the accent light isn't (to our knowledge) active,
         # so the next switch-to-accent starts over at preset 0.
         self._accent_preset_index: Optional[int] = None
+
+        # light_presets STOP-cycling: which preset was last applied.
+        # None means the next STOP starts over at preset 0; reset
+        # whenever the light is turned on or off via ON/OFF.
+        self._light_preset_index: Optional[int] = None
 
     # =============================================================
     # PROFILE HELPERS
@@ -272,6 +279,7 @@ class LightActions:
         """Set the optimistic target and schedule the ON tap action."""
         percentage = self.ctrl.conf.light_on_pct
         self._set_brightness_target(percentage)
+        self._light_preset_index = None
 
         self.ctrl.create_task(
             self._turn_on(percentage),
@@ -284,6 +292,7 @@ class LightActions:
     ) -> None:
         """Set the optimistic target to OFF and schedule the tap action."""
         self._set_brightness_target(0)
+        self._light_preset_index = None
 
         self.ctrl.create_task(
             self._turn_off(),
@@ -352,9 +361,8 @@ class LightActions:
         else:
             self._accent_preset_index = (self._accent_preset_index + 1) % len(presets)
 
-    def _accent_light_data(self) -> dict[str, Any]:
-        """Return the current accent preset's turn-on data."""
-        preset = self._current_accent_preset()
+    def _preset_service_data(self, preset: "AccentPreset") -> dict[str, Any]:
+        """Return one preset's turn-on data (shared by accent and light presets)."""
         data: dict[str, Any] = {"brightness_pct": preset.brightness_pct}
 
         if preset.effect:
@@ -365,6 +373,10 @@ class LightActions:
             data["rgb_color"] = list(preset.rgb_color)
 
         return data
+
+    def _accent_light_data(self) -> dict[str, Any]:
+        """Return the current accent preset's turn-on data."""
+        return self._preset_service_data(self._current_accent_preset())
 
     def _schedule_switch_to_center(
         self,
@@ -433,6 +445,42 @@ class LightActions:
         )
 
     # =============================================================
+    # 3BRL STOP LIGHT-PRESET CYCLING
+    # =============================================================
+
+    def _current_light_preset(self) -> "AccentPreset":
+        """Return the light preset STOP most recently applied (or will next)."""
+        presets = self.ctrl.conf.light_presets
+        index = self._light_preset_index if self._light_preset_index is not None else 0
+
+        return presets[min(index, len(presets) - 1)]
+
+    def _advance_light_preset(self) -> None:
+        """
+        Move to the next light preset, or the first after ON/OFF reset it.
+
+        With a single configured preset this always resolves to index 0,
+        so STOP just reapplies the same appearance every time.
+        """
+        presets = self.ctrl.conf.light_presets
+
+        if self._light_preset_index is None:
+            self._light_preset_index = 0
+        else:
+            self._light_preset_index = (self._light_preset_index + 1) % len(presets)
+
+    async def _apply_light_preset(self) -> None:
+        """Turn `lights` on with the current light preset's appearance."""
+        data = self._preset_service_data(self._current_light_preset())
+        data.update(self._transition_data(turning_on=True))
+
+        await self.ctrl.utils.call_service(
+            "turn_on",
+            data,
+            domain="light",
+        )
+
+    # =============================================================
     # PROFILE ENTRY POINTS
     # =============================================================
 
@@ -481,13 +529,23 @@ class LightActions:
 
         actions = self.ctrl.conf.middle_button
 
-        if not actions:
-            _LOGGER.debug("Light STOP pressed: no middle_button actions configured")
+        if actions:
+            self.ctrl.create_task(
+                self.ctrl.utils.execute_button_action(actions),
+                "light-middle-button",
+            )
             return
 
-        self.ctrl.create_task(
-            self.ctrl.utils.execute_button_action(actions),
-            "light-middle-button",
+        if self.ctrl.conf.light_presets:
+            self._advance_light_preset()
+            self.ctrl.create_task(
+                self._apply_light_preset(),
+                "light-stop-preset-cycle",
+            )
+            return
+
+        _LOGGER.debug(
+            "Light STOP pressed: no middle_button actions or light_presets configured"
         )
 
     def release_stop(self) -> None:
@@ -739,3 +797,4 @@ class LightActions:
         self._clear_gesture()
         self._clear_brightness_target()
         self._accent_preset_index = None
+        self._light_preset_index = None

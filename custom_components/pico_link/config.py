@@ -78,6 +78,12 @@ class PicoConfig:
     accent_lights: list[str] = field(default_factory=list)
     accent_light_presets: list[AccentPreset] = field(default_factory=lambda: [AccentPreset()])
 
+    # 3BRL only, and only outside dual-light mode (accent_lights empty).
+    # A non-empty list makes STOP cycle `lights` through these
+    # appearances instead of running middle_button (mutually exclusive
+    # with both accent_lights and middle_button — see validate()).
+    light_presets: list[AccentPreset] = field(default_factory=list)
+
     # Media-player configuration.
     media_player_vol_step: int = 10
 
@@ -214,6 +220,34 @@ class PicoConfig:
                     f"Pico {self.device_id} lists "
                     f"{', '.join(sorted(overlap))} in both 'lights' "
                     "and 'accent_lights'."
+                )
+
+        if self.light_presets:
+            if self.type != "3BRL":
+                raise ValueError(
+                    f"Pico {self.device_id} ({self.type}) cannot define "
+                    "'light_presets'. Only 3BRL Picos can cycle light "
+                    "presets from the STOP button."
+                )
+
+            if not self.lights:
+                raise ValueError(
+                    f"Pico {self.device_id} defines 'light_presets' "
+                    "without 'lights'."
+                )
+
+            if self.accent_lights:
+                raise ValueError(
+                    f"Pico {self.device_id} defines both 'accent_lights' "
+                    "and 'light_presets'. Configure one or the other, "
+                    "not both."
+                )
+
+            if self.middle_button:
+                raise ValueError(
+                    f"Pico {self.device_id} defines both 'middle_button' "
+                    "and 'light_presets'. STOP can run custom actions or "
+                    "cycle light presets, not both."
                 )
 
         for button, hold_actions, double_tap_actions in (
@@ -409,6 +443,57 @@ def _normalize_accent_presets(value: Any) -> list["AccentPreset"]:
         return [AccentPreset()]
 
     return [_normalize_accent_preset(item) for item in value]
+
+
+def _normalize_light_preset(value: Any) -> "AccentPreset":
+    """Normalize one STOP-cycled light-appearance preset entry."""
+    item = value if isinstance(value, dict) else {}
+
+    return AccentPreset(
+        effect=_normalize_effect(
+            item.get("light_preset_effect"),
+            key="light_preset_effect",
+        ),
+        color_mode=_normalize_color_mode(
+            item.get("light_preset_color_mode"),
+        ),
+        rgb_color=_normalize_rgb_color(
+            item.get("light_preset_rgb_color"),
+            key="light_preset_rgb_color",
+            default=[255, 255, 255],
+        ),
+        color_temp_kelvin=_normalize_int(
+            item.get(
+                "light_preset_color_temp_kelvin",
+                2700,
+            ),
+            default=2700,
+            min_val=1000,
+            max_val=10000,
+        ),
+        brightness_pct=_normalize_int(
+            item.get(
+                "light_preset_brightness_pct",
+                100,
+            ),
+            default=100,
+            min_val=1,
+            max_val=100,
+        ),
+    )
+
+
+def _normalize_light_presets(value: Any) -> list["AccentPreset"]:
+    """
+    Normalize the STOP button's list of cycled light-appearance presets.
+
+    Unlike accent presets, an empty list here is valid and means the
+    feature is off — STOP falls back to middle_button or no action.
+    """
+    if not isinstance(value, list):
+        return []
+
+    return [_normalize_light_preset(item) for item in value]
 
 
 def _normalize_entities(
@@ -842,6 +927,10 @@ async def parse_pico_config(
         merged.get("accent_light_presets"),
     )
 
+    light_presets = _normalize_light_presets(
+        merged.get("light_presets"),
+    )
+
     media_player_vol_step = _normalize_int(
         merged.get(
             "media_player_vol_step",
@@ -969,6 +1058,7 @@ async def parse_pico_config(
         light_transition_off=light_transition_off,
         light_on_off_toggle=light_on_off_toggle,
         accent_light_presets=accent_light_presets,
+        light_presets=light_presets,
         media_player_vol_step=media_player_vol_step,
         middle_button=middle_button,
         on_hold=on_hold,

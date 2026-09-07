@@ -60,6 +60,10 @@
   ON hold (P2B/2B) on a light that's off now lands at `light_low_pct`
   instead of a single `light_step_pct`, matching how a native Lutron dimmer
   behaves.
+- **STOP light-preset cycling (3BRL)** — outside dual-light mode, STOP can
+  cycle a light through several saved appearances instead of doing nothing,
+  using the same preset editor (with live preview) as dual-light mode. See
+  [STOP light-preset cycling](#stop-light-preset-cycling).
 
 ---
 
@@ -263,21 +267,23 @@ Every timing and domain option is configured on the **Options** step of setup
 | `light_transition_on`    | Light                |            `0` | `0–300` seconds                       |
 | `light_transition_off`   | Light                |            `0` | `0–300` seconds                       |
 | `light_on_off_toggle`    | Light                |        `false` | Boolean                               |
-| `accent_lights`          | Light (P2B, 2B)      |            `[]` | Entity list                           |
-| `accent_light_presets`   | Light (P2B, 2B)      | one default preset | List of presets (see below); cycled through on repeated OFF taps |
+| `accent_lights`          | Light (P2B, 2B, 3BRL) |          `[]` | Entity list                           |
+| `accent_light_presets`   | Light (P2B, 2B, 3BRL) | one default preset | List of presets (see below); cycled through on repeated OFF taps |
+| `light_presets`          | Light (3BRL only)    |            `[]` | List of presets (see below); cycled through on every STOP press when non-empty |
 | `media_player_vol_step`  | Media player         |           `10` | `1–20` percent                        |
 
 Only the fields relevant to the Pico's assigned domain are shown. Numeric
 selectors are clamped to their listed range.
 
-Each entry in `accent_light_presets` has its own:
+Each entry in `accent_light_presets` or `light_presets` has its own
+(`accent_light_*` / `light_preset_*` respectively):
 
 | Field                       | Default          | Range or values                       |
 | ---------------------------- | ----------------- | -------------------------------------- |
-| `accent_light_color_mode`    | `rgb`            | `rgb` or `color_temp`; only offered if the accent light supports white temperature |
+| `accent_light_color_mode`    | `rgb`            | `rgb` or `color_temp`; only offered if the accent (or, for `light_preset_*`, the first configured) light supports white temperature |
 | `accent_light_rgb_color`     | `[255,255,255]`  | RGB triplet                           |
-| `accent_light_color_temp_kelvin` | `2700`       | Kelvin, clamped to the accent light's supported range |
-| `accent_light_effect`        | `""`             | Picked from the accent light's available effects; overrides color/white temperature when set |
+| `accent_light_color_temp_kelvin` | `2700`       | Kelvin, clamped to the light's supported range |
+| `accent_light_effect`        | `""`             | Picked from the light's available effects; overrides color/white temperature when set |
 | `accent_light_brightness_pct` | `100`           | `1–100` percent                       |
 
 ---
@@ -371,6 +377,25 @@ clearing `accent_lights` and rebuilding dual-light mode from scratch.
 
 Rapid repeated brightness taps use the most recently requested brightness for a
 short period instead of waiting for Home Assistant state to update.
+
+### STOP light-preset cycling
+
+For a `3BRL` assigned to the light domain and **not** in dual-light mode
+(`accent_lights` empty), STOP can instead cycle `lights` through one or
+more saved appearances — for example switching a LIFX bulb between white
+temperatures with the middle button. Configured on the "Light presets"
+options step (shown only when there's no accent light), which offers the
+same "Try it" preview, "Remove this preset", and "Add another preset"
+(up to 5) controls as dual-light presets, plus a leading "Cycle light
+appearance from STOP" checkbox — leaving it unchecked configures nothing,
+and STOP keeps its normal behavior instead.
+
+Every STOP press advances to the next preset, wrapping back to the first
+after the last; turning the light on or off via ON/OFF resets the cycle
+back to the first preset. This is mutually exclusive with both
+`accent_lights` and custom STOP actions (`middle_button`) — configuring
+one clears the others, and the options flow won't let both be set at
+once.
 
 ### Light transitions
 
@@ -541,7 +566,10 @@ configured on the **Custom actions** step.
 Resolution order:
 
 1. Custom STOP actions configured on the Pico
-2. Domain-specific STOP behavior when no custom actions are configured
+2. For a light-domain 3BRL outside dual-light mode: cycling through
+   `light_presets`, if configured (see
+   [STOP light-preset cycling](#stop-light-preset-cycling))
+3. Domain-specific STOP behavior when none of the above is configured
 
 ### Domain defaults
 

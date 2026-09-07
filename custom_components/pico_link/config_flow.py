@@ -482,6 +482,184 @@ def _accent_light_appearance_schema(
     return vol.Schema(fields)
 
 
+def _light_preview_service_data(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Build a light.turn_on payload for previewing an in-progress light preset."""
+    data: dict[str, Any] = {
+        "brightness_pct": user_input.get("light_preset_brightness_pct", 100),
+    }
+
+    effect = user_input.get("light_preset_effect", "")
+
+    if effect:
+        data["effect"] = effect
+    elif user_input.get("light_preset_color_mode") == _ACCENT_COLOR_MODE_TEMP:
+        data["color_temp_kelvin"] = user_input.get(
+            "light_preset_color_temp_kelvin",
+            2700,
+        )
+    else:
+        data["rgb_color"] = user_input.get(
+            "light_preset_rgb_color",
+            [255, 255, 255],
+        )
+
+    return data
+
+
+def _light_preset_appearance_schema(
+    current: dict[str, Any] | None = None,
+    *,
+    effect_options: list[str] | None = None,
+    supports_color_temp: bool = False,
+    color_temp_range: tuple[int, int] | None = None,
+    offer_add_another: bool = False,
+    offer_remove: bool = False,
+    offer_enable_toggle: bool = False,
+    enable_default: bool = False,
+) -> vol.Schema:
+    """
+    3BRL only: one STOP-cycled light-appearance preset.
+
+    Parallels _accent_light_appearance_schema for `lights` instead of
+    `accent_lights`. offer_enable_toggle adds the leading
+    "cycle_light_presets" opt-in field, shown only on the first preset —
+    leaving it unchecked there skips the feature entirely.
+    """
+    current = current or {}
+    effect_options = effect_options or []
+
+    fields: dict[Any, Any] = {}
+
+    if offer_enable_toggle:
+        fields[
+            vol.Optional(
+                "cycle_light_presets",
+                default=enable_default,
+            )
+        ] = selector.BooleanSelector()
+
+    current_effect = current.get("light_preset_effect", _NO_EFFECT)
+
+    effect_choices = [
+        selector.SelectOptionDict(
+            value=_NO_EFFECT,
+            label="No effect (use color)",
+        ),
+        *(
+            selector.SelectOptionDict(value=effect, label=effect)
+            for effect in effect_options
+        ),
+    ]
+
+    if current_effect != _NO_EFFECT and current_effect not in effect_options:
+        effect_choices.append(
+            selector.SelectOptionDict(
+                value=current_effect,
+                label=f"{current_effect} (not currently available)",
+            )
+        )
+
+    fields[
+        vol.Optional(
+            "light_preset_rgb_color",
+            default=current.get(
+                "light_preset_rgb_color",
+                [255, 255, 255],
+            ),
+        )
+    ] = selector.ColorRGBSelector()
+
+    if supports_color_temp:
+        min_kelvin, max_kelvin = color_temp_range or (2000, 6535)
+
+        fields[
+            vol.Optional(
+                "light_preset_color_mode",
+                default=current.get(
+                    "light_preset_color_mode",
+                    _ACCENT_COLOR_MODE_RGB,
+                ),
+            )
+        ] = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    selector.SelectOptionDict(
+                        value=_ACCENT_COLOR_MODE_RGB,
+                        label="Color",
+                    ),
+                    selector.SelectOptionDict(
+                        value=_ACCENT_COLOR_MODE_TEMP,
+                        label="White temperature",
+                    ),
+                ],
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        )
+
+        fields[
+            vol.Optional(
+                "light_preset_color_temp_kelvin",
+                default=current.get(
+                    "light_preset_color_temp_kelvin",
+                    2700,
+                ),
+            )
+        ] = selector.ColorTempSelector(
+            selector.ColorTempSelectorConfig(
+                unit=selector.ColorTempSelectorUnit.KELVIN,
+                min=min_kelvin,
+                max=max_kelvin,
+            )
+        )
+
+    fields[
+        vol.Optional(
+            "light_preset_effect",
+            default=current_effect,
+        )
+    ] = selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=effect_choices,
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+
+    fields[
+        vol.Optional(
+            "light_preset_brightness_pct",
+            default=current.get(
+                "light_preset_brightness_pct",
+                100,
+            ),
+        )
+    ] = _percent(1, 100)
+
+    fields[
+        vol.Optional(
+            "preview_this_preset",
+            default=False,
+        )
+    ] = selector.BooleanSelector()
+
+    if offer_remove:
+        fields[
+            vol.Optional(
+                "remove_this_preset",
+                default=False,
+            )
+        ] = selector.BooleanSelector()
+
+    if offer_add_another:
+        fields[
+            vol.Optional(
+                "add_another_preset",
+                default=False,
+            )
+        ] = selector.BooleanSelector()
+
+    return vol.Schema(fields)
+
+
 _TEST_ACTION_NONE = "none"
 
 
@@ -885,7 +1063,11 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         self._domain: str = ""
         self._options: dict[str, Any] = dict(config_entry.options)
         self._accent_presets: list[dict[str, Any]] = []
+        self._accent_preset_read_index = 0
         self._preview_prefill: dict[str, Any] | None = None
+        self._light_presets: list[dict[str, Any]] = []
+        self._light_preset_read_index = 0
+        self._light_preset_prefill: dict[str, Any] | None = None
         self._custom_actions_prefill: dict[str, Any] | None = None
         self._scene_hold_prefill: dict[str, Any] | None = None
 
@@ -1031,7 +1213,14 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
-        """Pick the accent light entities for dual-light mode."""
+        """
+        Pick the accent light entities for dual-light mode.
+
+        Leaving this empty skips dual-light mode. For a 3BRL, that
+        instead offers the (also optional) STOP light-preset cycling
+        step — the two are mutually exclusive, so choosing one clears
+        any leftover configuration from the other.
+        """
         errors: dict[str, str] = {}
         current = self._options
 
@@ -1044,7 +1233,17 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 current = {**self._options, "accent_lights": accent_lights}
             else:
                 self._options["accent_lights"] = accent_lights
-                return await self.async_step_accent_light_appearance()
+
+                if accent_lights:
+                    self._options.pop("light_presets", None)
+                    return await self.async_step_accent_light_appearance()
+
+                self._options.pop("accent_light_presets", None)
+
+                if self._type == "3BRL":
+                    return await self.async_step_light_presets()
+
+                return self._async_finish()
 
         return self.async_show_form(
             step_id="accent_light",
@@ -1081,8 +1280,10 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             self._preview_prefill = None
 
             if user_input.pop("remove_this_preset", False):
+                self._accent_preset_read_index += 1
                 return await self.async_step_accent_light_appearance()
 
+            self._accent_preset_read_index += 1
             add_another = user_input.pop("add_another_preset", False)
             self._accent_presets.append(user_input)
 
@@ -1097,8 +1298,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             return self._async_finish()
 
         color_temp_range = self._accent_light_color_temp_range()
-        index = len(self._accent_presets)
-        preset_number = index + 1
+        preset_number = len(self._accent_presets) + 1
 
         return self.async_show_form(
             step_id="accent_light_appearance",
@@ -1108,7 +1308,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 supports_color_temp=color_temp_range is not None,
                 color_temp_range=color_temp_range,
                 offer_add_another=preset_number < self.MAX_ACCENT_PRESETS,
-                offer_remove=index < len(existing),
+                offer_remove=self._accent_preset_read_index < len(existing),
             ),
             description_placeholders={"preset_number": str(preset_number)},
         )
@@ -1116,7 +1316,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
     def _current_accent_preset_default(self) -> dict[str, Any]:
         """Prefill defaults for the preset currently being edited/added."""
         existing = self._options.get("accent_light_presets") or []
-        index = len(self._accent_presets)
+        index = self._accent_preset_read_index
 
         return existing[index] if index < len(existing) else {}
 
@@ -1192,6 +1392,151 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
         return (int(min_kelvin), int(max_kelvin))
 
+    async def async_step_light_presets(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """
+        3BRL only: optional STOP-button cycling through light appearances.
+
+        Only reached when accent_lights was left empty (see
+        async_step_accent_light) — dual-light mode and this are
+        mutually exclusive. The first preset's form also carries the
+        "cycle_light_presets" opt-in; leaving it unchecked there
+        configures nothing and STOP keeps its normal behavior
+        (middle_button, or no action). Checking "Try it" applies
+        what's filled in immediately; "Remove this preset" (existing
+        presets only) drops one; "Add another preset" builds a list
+        STOP advances through on every press, wrapping after the last.
+        """
+        existing = self._options.get("light_presets") or []
+
+        if user_input is not None:
+            if user_input.pop("preview_this_preset", False):
+                await self._preview_light_preset(user_input)
+                self._light_preset_prefill = user_input
+                return await self.async_step_light_presets()
+
+            self._light_preset_prefill = None
+
+            if not self._light_presets and not user_input.pop(
+                "cycle_light_presets", False
+            ):
+                self._options["light_presets"] = []
+                return await self.async_step_custom_actions()
+
+            if user_input.pop("remove_this_preset", False):
+                self._light_preset_read_index += 1
+                return await self.async_step_light_presets()
+
+            self._light_preset_read_index += 1
+            add_another = user_input.pop("add_another_preset", False)
+            self._light_presets.append(user_input)
+
+            if add_another and len(self._light_presets) < self.MAX_ACCENT_PRESETS:
+                return await self.async_step_light_presets()
+
+            self._options["light_presets"] = self._light_presets
+            return await self.async_step_custom_actions()
+
+        color_temp_range = self._light_color_temp_range()
+        index = len(self._light_presets)
+        preset_number = index + 1
+
+        return self.async_show_form(
+            step_id="light_presets",
+            data_schema=_light_preset_appearance_schema(
+                current=self._light_preset_prefill or self._current_light_preset_default(),
+                effect_options=self._light_effect_options(),
+                supports_color_temp=color_temp_range is not None,
+                color_temp_range=color_temp_range,
+                offer_add_another=preset_number < self.MAX_ACCENT_PRESETS,
+                offer_remove=self._light_preset_read_index < len(existing),
+                offer_enable_toggle=index == 0,
+                enable_default=bool(existing),
+            ),
+            description_placeholders={"preset_number": str(preset_number)},
+        )
+
+    def _current_light_preset_default(self) -> dict[str, Any]:
+        """Prefill defaults for the light preset currently being edited/added."""
+        existing = self._options.get("light_presets") or []
+        index = self._light_preset_read_index
+
+        return existing[index] if index < len(existing) else {}
+
+    async def _preview_light_preset(self, user_input: dict[str, Any]) -> None:
+        """Turn on `lights` with an in-progress light preset, for a live look."""
+        lights = self._options.get("lights") or []
+
+        if not lights:
+            return
+
+        await self.hass.services.async_call(
+            "light",
+            "turn_on",
+            {
+                **_light_preview_service_data(user_input),
+                "entity_id": lights,
+            },
+            blocking=False,
+        )
+
+    def _light_effect_options(self) -> list[str]:
+        """Return the effect names supported by the first configured light."""
+        lights = self._options.get("lights") or []
+
+        if not lights:
+            return []
+
+        state = self.hass.states.get(lights[0])
+
+        if not state:
+            return []
+
+        effect_list = state.attributes.get("effect_list")
+
+        if not isinstance(effect_list, list):
+            return []
+
+        return [effect for effect in effect_list if isinstance(effect, str)]
+
+    def _light_color_temp_range(self) -> tuple[int, int] | None:
+        """
+        Return the first configured light's (min, max) Kelvin range.
+
+        None when there's no light selected yet, or the first one
+        doesn't support color temperature.
+        """
+        lights = self._options.get("lights") or []
+
+        if not lights:
+            return None
+
+        state = self.hass.states.get(lights[0])
+
+        if not state:
+            return None
+
+        supported_color_modes = state.attributes.get("supported_color_modes")
+
+        if (
+            not isinstance(supported_color_modes, list)
+            or "color_temp" not in supported_color_modes
+        ):
+            return None
+
+        min_kelvin = state.attributes.get("min_color_temp_kelvin")
+        max_kelvin = state.attributes.get("max_color_temp_kelvin")
+
+        if not isinstance(min_kelvin, (int, float)) or not isinstance(
+            max_kelvin,
+            (int, float),
+        ):
+            return (2000, 6535)
+
+        return (int(min_kelvin), int(max_kelvin))
+
     async def async_step_custom_actions(
         self,
         user_input: dict[str, Any] | None = None,
@@ -1226,6 +1571,11 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
                 if conflicts:
                     errors["base"] = "hold_and_double_tap_conflict"
+                    self._custom_actions_prefill = user_input
+                elif user_input.get("middle_button") and self._options.get(
+                    "light_presets"
+                ):
+                    errors["base"] = "middle_button_light_presets_conflict"
                     self._custom_actions_prefill = user_input
                 else:
                     for field_name in (
