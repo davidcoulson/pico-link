@@ -1420,7 +1420,10 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         if not isinstance(effect_list, list):
             return []
 
-        return [effect for effect in effect_list if isinstance(effect, str)]
+        return sorted(
+            (effect for effect in effect_list if isinstance(effect, str)),
+            key=str.casefold,
+        )
 
     def _accent_light_color_temp_range(self) -> tuple[int, int] | None:
         """
@@ -1568,7 +1571,10 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         if not isinstance(effect_list, list):
             return []
 
-        return [effect for effect in effect_list if isinstance(effect, str)]
+        return sorted(
+            (effect for effect in effect_list if isinstance(effect, str)),
+            key=str.casefold,
+        )
 
     def _light_color_temp_range(self) -> tuple[int, int] | None:
         """

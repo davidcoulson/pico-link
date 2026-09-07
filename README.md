@@ -370,9 +370,9 @@ appearance" steps — one per preset — after the accent light(s) are selected,
 since the available choices depend on what that light supports:
 
 - **Effect** — picked from a dropdown of the first accent light's actual
-  supported effects (`effect_list`), instead of typing a name. Leave it on
-  "No effect" to use color or white temperature instead. When set, it takes
-  priority over both.
+  supported effects (`effect_list`, alphabetized), instead of typing a
+  name. Leave it on "No effect" to use color or white temperature
+  instead. When set, it takes priority over both.
 - **White temperature** — only offered when the first accent light supports
   color temperature; lets you pick "Color" (RGB) or "White temperature"
   (Kelvin, clamped to that light's supported range) as the preset's

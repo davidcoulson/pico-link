@@ -1,7 +1,7 @@
 {
   "name": "Pico Link",
   "domain": "pico_link",
-  "version": "2026.09.07.03",
+  "version": "2026.09.07.04",
   "config_flow": true,
   "documentation": "https://github.com/davidcoulson/pico-link",
   "issue_tracker": "https://github.com/davidcoulson/pico-link/issues",
