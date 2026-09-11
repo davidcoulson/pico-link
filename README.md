@@ -216,17 +216,29 @@ and it drops out of the device list once added.
 ### Editing a Pico
 
 Open the entry under **Settings → Devices & Services** and click
-**Configure**. The first step lets you add or remove Picos from the entry —
-only Picos of this entry's type that aren't claimed by another entry are
-offered, and at least one must remain. Non-4B entries then get the same
-entity picker used during setup (you can even switch which domain it
-controls here), followed by the timing and domain-specific
-[options](#options), and for `3BRL` Picos, the custom actions builder —
-none of which the initial add flow asks about, since the defaults just
-work.
-4B entries get the same button-action editor used during setup. Changes take
-effect immediately and apply to every Pico in the entry; Pico Link
-automatically reloads them all.
+**Configure**. You land on a menu of what to edit, so a small change
+doesn't require re-walking every screen:
+
+- **Devices, entities & full setup** — the full chain: add or remove
+  Picos from the entry (only Picos of this entry's type that aren't
+  claimed by another entry are offered, and at least one must remain),
+  then, for non-4B entries, the same entity picker used during setup
+  (you can even switch which domain it controls here), the timing and
+  domain-specific [options](#options), accent light / STOP light-preset
+  cycling where applicable, and for `3BRL` Picos, the custom actions
+  builder — none of which the initial add flow asks about, since the
+  defaults just work. 4B entries get the same button-action editor used
+  during setup, followed by scene hold/double-tap actions.
+- **Timing & behavior** — just the domain-specific [options](#options)
+  screen, saved as soon as you submit it.
+- **Accent light / dual-light mode** — just the accent light (or, for a
+  `3BRL` without one, [STOP light-preset cycling](#stop-light-preset-cycling))
+  screens, saved once that's done.
+- **Custom actions** (`3BRL`) / **Scene buttons** and **Scene hold &
+  double-tap actions** (4B) — jump straight to that one screen.
+
+Changes take effect immediately and apply to every Pico in the entry;
+Pico Link automatically reloads them all.
 
 Non-4B entries (and new ones from setup) also get their controlled
 entities appended to the entry's title on the plain **Settings → Devices
@@ -271,8 +283,8 @@ assigned lights.
 
 ## Options
 
-Every timing and domain option is configured on the **Options** step of setup
-(or editing), pre-filled with these defaults:
+Every timing and domain option is configured on the **Timing & behavior**
+step of setup (or editing), pre-filled with these defaults:
 
 | Field                    | Applies to          |        Default | Range or values                       |
 | ------------------------ | -------------------- | --------------: | -------------------------------------- |
@@ -380,21 +392,25 @@ since the available choices depend on what that light supports:
 - **Color** — a plain RGB color, used when neither an effect nor white
   temperature is selected.
 
-Checking **Try it** on that step turns the accent light(s) on right away
-with whatever's currently filled in, so you can see a preset before
-continuing — it re-shows the same step afterward with your values kept, and
-doesn't count as finishing the preset.
+Each preset's step ends with a single **What next?** choice instead of a
+pile of checkboxes, since only one of these ever applies at a time:
 
-Checking "Add another preset" on that step repeats it to build a list
-(`accent_light_presets`, up to 5). With only one preset, OFF always shows
-the same appearance, exactly as if presets didn't exist. With more than
-one, ON always resets back to the first preset — only repeated OFF taps
-advance through the list, wrapping back to the first after the last.
-
-When editing an entry that already has more than one preset, each existing
-preset's step also offers "Remove this preset" — checking it drops that
-preset and shifts any later ones up, so a list can be shrunk without
-clearing `accent_lights` and rebuilding dual-light mode from scratch.
+- **Try it** turns the accent light(s) on right away with whatever's
+  currently filled in, so you can see a preset before continuing — it
+  re-shows the same step afterward with your values kept, and doesn't
+  count as finishing the preset.
+- **Save and add another preset** keeps this one and repeats the step to
+  build a list (`accent_light_presets`, up to 5). With only one preset,
+  OFF always shows the same appearance, exactly as if presets didn't
+  exist. With more than one, ON always resets back to the first preset —
+  only repeated OFF taps advance through the list, wrapping back to the
+  first after the last. When editing an entry that already has more
+  presets than you've stepped through so far, this is preselected by
+  default, so simply saving each screen keeps the rest of the list intact.
+- **Remove this preset** (only offered for a preset that already exists)
+  drops it and shifts any later ones up, so a list can be shrunk without
+  clearing `accent_lights` and rebuilding dual-light mode from scratch.
+- **Save** finishes the list here.
 
 Rapid repeated brightness taps use the most recently requested brightness for a
 short period instead of waiting for Home Assistant state to update.
@@ -406,10 +422,10 @@ For a `3BRL` assigned to the light domain and **not** in dual-light mode
 more saved appearances — for example switching a LIFX bulb between white
 temperatures with the middle button. Configured on the "Light presets"
 options step (shown only when there's no accent light), which offers the
-same "Try it" preview, "Remove this preset", and "Add another preset"
-(up to 5) controls as dual-light presets, plus a leading "Cycle light
-appearance from STOP" checkbox — leaving it unchecked configures nothing,
-and STOP keeps its normal behavior instead.
+same "What next?" choice (Try it / Save and add another preset / Remove
+this preset / Save, up to 5 presets) as dual-light presets, plus a
+leading "Cycle light appearance from STOP" checkbox — leaving it
+unchecked configures nothing, and STOP keeps its normal behavior instead.
 
 Every STOP press advances to the next preset, wrapping back to the first
 after the last; turning the light on or off via ON/OFF resets the cycle
