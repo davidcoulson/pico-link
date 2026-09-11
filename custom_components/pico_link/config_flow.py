@@ -315,6 +315,48 @@ _ACCENT_COLOR_MODE_TEMP = "color_temp"
 # dialog's own white background.
 _DEFAULT_PRESET_RGB_COLOR = [255, 166, 0]
 
+# A preset step's trailing action is a single choice, not independent
+# checkboxes — "Try it" + "Remove this preset" checked together made no
+# sense before, and could silently do either depending on field order.
+_PRESET_ACTION_SAVE = "save"
+_PRESET_ACTION_TRY_IT = "try_it"
+_PRESET_ACTION_ADD_ANOTHER = "add_another"
+_PRESET_ACTION_REMOVE = "remove"
+
+
+def _preset_next_action_field(
+    *,
+    offer_add_another: bool,
+    offer_remove: bool,
+) -> selector.SelectSelector:
+    options = [
+        selector.SelectOptionDict(value=_PRESET_ACTION_SAVE, label="Save"),
+        selector.SelectOptionDict(value=_PRESET_ACTION_TRY_IT, label="Try it"),
+    ]
+
+    if offer_add_another:
+        options.append(
+            selector.SelectOptionDict(
+                value=_PRESET_ACTION_ADD_ANOTHER,
+                label="Save and add another preset",
+            )
+        )
+
+    if offer_remove:
+        options.append(
+            selector.SelectOptionDict(
+                value=_PRESET_ACTION_REMOVE,
+                label="Remove this preset",
+            )
+        )
+
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=options,
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+
 
 def _accent_preview_service_data(user_input: dict[str, Any]) -> dict[str, Any]:
     """
@@ -353,6 +395,7 @@ def _accent_light_appearance_schema(
     supports_color_temp: bool = False,
     color_temp_range: tuple[int, int] | None = None,
     offer_add_another: bool = False,
+    add_another_default: bool = False,
     offer_remove: bool = False,
 ) -> vol.Schema:
     """P2B/2B/3BRL only: one accent-light preset's color, effect, and brightness."""
@@ -461,28 +504,18 @@ def _accent_light_appearance_schema(
         )
     ] = _percent(1, 100)
 
-    fields[
-        vol.Optional(
-            "preview_this_preset",
-            default=False,
+    default_action = (
+        _PRESET_ACTION_ADD_ANOTHER
+        if offer_add_another and add_another_default
+        else _PRESET_ACTION_SAVE
+    )
+
+    fields[vol.Optional("next_action", default=default_action)] = (
+        _preset_next_action_field(
+            offer_add_another=offer_add_another,
+            offer_remove=offer_remove,
         )
-    ] = selector.BooleanSelector()
-
-    if offer_remove:
-        fields[
-            vol.Optional(
-                "remove_this_preset",
-                default=False,
-            )
-        ] = selector.BooleanSelector()
-
-    if offer_add_another:
-        fields[
-            vol.Optional(
-                "add_another_preset",
-                default=False,
-            )
-        ] = selector.BooleanSelector()
+    )
 
     return vol.Schema(fields)
 
@@ -518,6 +551,7 @@ def _light_preset_appearance_schema(
     supports_color_temp: bool = False,
     color_temp_range: tuple[int, int] | None = None,
     offer_add_another: bool = False,
+    add_another_default: bool = False,
     offer_remove: bool = False,
     offer_enable_toggle: bool = False,
     enable_default: bool = False,
@@ -639,28 +673,18 @@ def _light_preset_appearance_schema(
         )
     ] = _percent(1, 100)
 
-    fields[
-        vol.Optional(
-            "preview_this_preset",
-            default=False,
+    default_action = (
+        _PRESET_ACTION_ADD_ANOTHER
+        if offer_add_another and add_another_default
+        else _PRESET_ACTION_SAVE
+    )
+
+    fields[vol.Optional("next_action", default=default_action)] = (
+        _preset_next_action_field(
+            offer_add_another=offer_add_another,
+            offer_remove=offer_remove,
         )
-    ] = selector.BooleanSelector()
-
-    if offer_remove:
-        fields[
-            vol.Optional(
-                "remove_this_preset",
-                default=False,
-            )
-        ] = selector.BooleanSelector()
-
-    if offer_add_another:
-        fields[
-            vol.Optional(
-                "add_another_preset",
-                default=False,
-            )
-        ] = selector.BooleanSelector()
+    )
 
     return vol.Schema(fields)
 
@@ -1114,12 +1138,83 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         self._light_preset_prefill: dict[str, Any] | None = None
         self._custom_actions_prefill: dict[str, Any] | None = None
         self._scene_hold_prefill: dict[str, Any] | None = None
+        self._quick_edit_section: str | None = None
 
     async def async_step_init(
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
-        return await self.async_step_devices()
+        """
+        Offer a menu so a small change doesn't require re-walking every step.
+
+        "devices" is the only entry that re-runs the full setup chain,
+        since changing devices or entities can affect what every later
+        step even offers. The other entries jump straight to one
+        section and save as soon as that section is done, instead of
+        continuing on into whatever the full chain would visit next.
+        """
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=self._init_menu_options(),
+        )
+
+    def _current_domain(self) -> str:
+        """This entry's already-configured entity domain, if any (cached)."""
+        if not self._domain:
+            self._domain = next(
+                (
+                    domain
+                    for domain, field in DOMAIN_ENTITY_FIELDS.items()
+                    if self._options.get(field)
+                ),
+                "",
+            )
+
+        return self._domain
+
+    def _init_menu_options(self) -> list[str]:
+        domain = self._current_domain()
+        options = ["devices"]
+
+        if domain:
+            options.append("options_quick")
+
+        if domain == "light" and self._type in ACCENT_LIGHT_PICO_TYPES:
+            options.append("accent_light_quick")
+
+        if self._type == "3BRL":
+            options.append("custom_actions")
+
+        if self._type == "4B":
+            options.append("buttons_quick")
+            options.append("scene_hold_actions")
+
+        return options
+
+    async def async_step_options_quick(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Menu shortcut: edit timing/behavior alone, then save."""
+        self._quick_edit_section = "options"
+        self._current_domain()
+        return await self.async_step_options(user_input)
+
+    async def async_step_accent_light_quick(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Menu shortcut: edit dual-light / STOP light-preset cycling alone, then save."""
+        self._quick_edit_section = "accent_light"
+        return await self.async_step_accent_light(user_input)
+
+    async def async_step_buttons_quick(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Menu shortcut (4B): edit scene button assignments alone, then save."""
+        self._quick_edit_section = "buttons"
+        return await self.async_step_buttons(user_input)
 
     async def async_step_devices(
         self,
@@ -1243,6 +1338,9 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             self._options.update(user_input)
 
+            if self._quick_edit_section == "options":
+                return self._async_finish()
+
             if self._type in ACCENT_LIGHT_PICO_TYPES and self._domain == "light":
                 return await self.async_step_accent_light()
 
@@ -1258,11 +1356,15 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 current=self._options,
             ),
             description_placeholders={"domain": self._domain},
-            # Mirrors the branching just above: 3BRL always continues to
+            # Mirrors the branching just above: a quick edit always
+            # finishes here; otherwise 3BRL always continues to
             # accent_light or custom_actions, and light-domain P2B/2B
             # always continues to accent_light — every other case
             # finishes here.
-            last_step=self._type != "3BRL" and self._domain != "light",
+            last_step=(
+                self._quick_edit_section == "options"
+                or (self._type != "3BRL" and self._domain != "light")
+            ),
         )
 
     async def async_step_accent_light(
@@ -1319,39 +1421,43 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
         A separate step from picking the entities themselves, since the
         available effect and white-temperature choices depend on which
-        light(s) were just selected there. Checking "add another preset"
-        repeats this step to build accent_light_presets, which the
-        accent light cycles through on repeated OFF taps. Checking
+        light(s) were just selected there. Picking "Save and add another
+        preset" repeats this step to build accent_light_presets, which
+        the accent light cycles through on repeated OFF taps. Picking
         "Try it" turns the accent light(s) on with whatever's currently
         filled in and re-shows this same step, so a preset can be
-        checked by eye before moving on. Checking "Remove this preset"
+        checked by eye before moving on. Picking "Remove this preset"
         (only offered for a preset that already exists) drops it instead
         of keeping it, shifting any later presets up by one.
         """
         existing = self._options.get("accent_light_presets") or []
 
         if user_input is not None:
-            if user_input.pop("preview_this_preset", False):
+            next_action = user_input.pop("next_action", _PRESET_ACTION_SAVE)
+
+            if next_action == _PRESET_ACTION_TRY_IT:
                 await self._preview_accent_preset(user_input)
                 self._preview_prefill = user_input
                 return await self.async_step_accent_light_appearance()
 
             self._preview_prefill = None
 
-            if user_input.pop("remove_this_preset", False):
+            if next_action == _PRESET_ACTION_REMOVE:
                 self._accent_preset_read_index += 1
                 return await self.async_step_accent_light_appearance()
 
             self._accent_preset_read_index += 1
-            add_another = user_input.pop("add_another_preset", False)
             self._accent_presets.append(user_input)
 
-            if add_another and len(self._accent_presets) < self.MAX_ACCENT_PRESETS:
+            if (
+                next_action == _PRESET_ACTION_ADD_ANOTHER
+                and len(self._accent_presets) < self.MAX_ACCENT_PRESETS
+            ):
                 return await self.async_step_accent_light_appearance()
 
             self._options["accent_light_presets"] = self._accent_presets
 
-            if self._type == "3BRL":
+            if self._type == "3BRL" and self._quick_edit_section != "accent_light":
                 return await self.async_step_custom_actions()
 
             return self._async_finish()
@@ -1369,14 +1475,20 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 supports_color_temp=color_temp_range is not None,
                 color_temp_range=color_temp_range,
                 offer_add_another=offer_add_another,
+                add_another_default=self._accent_preset_read_index + 1 < len(existing),
                 offer_remove=self._accent_preset_read_index < len(existing),
             ),
             description_placeholders={"preset_number": str(preset_number)},
-            # A 3BRL always continues to custom_actions after presets are
-            # done; P2B/2B finishes here only once "add another" is no
-            # longer offered (at MAX_ACCENT_PRESETS) — otherwise it's the
-            # user's choice on this very submission, so not knowable yet.
-            last_step=self._type != "3BRL" and not offer_add_another,
+            # A quick "accent light" edit and P2B/2B both finish here once
+            # "add another" is no longer offered (at MAX_ACCENT_PRESETS);
+            # a full-chain 3BRL always continues to custom_actions after
+            # presets are done. Otherwise it's the user's choice on this
+            # very submission, so not knowable yet.
+            last_step=(
+                self._quick_edit_section == "accent_light"
+                or self._type != "3BRL"
+            )
+            and not offer_add_another,
         )
 
     def _current_accent_preset_default(self) -> dict[str, Any]:
@@ -1473,15 +1585,17 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         mutually exclusive. The first preset's form also carries the
         "cycle_light_presets" opt-in; leaving it unchecked there
         configures nothing and STOP keeps its normal behavior
-        (middle_button, or no action). Checking "Try it" applies
-        what's filled in immediately; "Remove this preset" (existing
-        presets only) drops one; "Add another preset" builds a list
+        (middle_button, or no action). Picking "Try it" applies what's
+        filled in immediately; "Remove this preset" (existing presets
+        only) drops one; "Save and add another preset" builds a list
         STOP advances through on every press, wrapping after the last.
         """
         existing = self._options.get("light_presets") or []
 
         if user_input is not None:
-            if user_input.pop("preview_this_preset", False):
+            next_action = user_input.pop("next_action", _PRESET_ACTION_SAVE)
+
+            if next_action == _PRESET_ACTION_TRY_IT:
                 await self._preview_light_preset(user_input)
                 self._light_preset_prefill = user_input
                 return await self.async_step_light_presets()
@@ -1492,25 +1606,37 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 "cycle_light_presets", False
             ):
                 self._options["light_presets"] = []
+
+                if self._quick_edit_section == "accent_light":
+                    return self._async_finish()
+
                 return await self.async_step_custom_actions()
 
-            if user_input.pop("remove_this_preset", False):
+            if next_action == _PRESET_ACTION_REMOVE:
                 self._light_preset_read_index += 1
                 return await self.async_step_light_presets()
 
             self._light_preset_read_index += 1
-            add_another = user_input.pop("add_another_preset", False)
             self._light_presets.append(user_input)
 
-            if add_another and len(self._light_presets) < self.MAX_ACCENT_PRESETS:
+            if (
+                next_action == _PRESET_ACTION_ADD_ANOTHER
+                and len(self._light_presets) < self.MAX_ACCENT_PRESETS
+            ):
                 return await self.async_step_light_presets()
 
             self._options["light_presets"] = self._light_presets
+
+            if self._quick_edit_section == "accent_light":
+                return self._async_finish()
+
             return await self.async_step_custom_actions()
 
         color_temp_range = self._light_color_temp_range()
         index = len(self._light_presets)
         preset_number = index + 1
+
+        offer_add_another = preset_number < self.MAX_ACCENT_PRESETS
 
         return self.async_show_form(
             step_id="light_presets",
@@ -1519,15 +1645,21 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 effect_options=self._light_effect_options(),
                 supports_color_temp=color_temp_range is not None,
                 color_temp_range=color_temp_range,
-                offer_add_another=preset_number < self.MAX_ACCENT_PRESETS,
+                offer_add_another=offer_add_another,
+                add_another_default=self._light_preset_read_index + 1 < len(existing),
                 offer_remove=self._light_preset_read_index < len(existing),
                 offer_enable_toggle=index == 0,
                 enable_default=bool(existing),
             ),
             description_placeholders={"preset_number": str(preset_number)},
-            # Every path out of this step leads to custom_actions next,
-            # whether the feature ends up enabled or not.
-            last_step=False,
+            # A full-chain edit always continues to custom_actions next,
+            # whether the feature ends up enabled or not; a quick "accent
+            # light" edit finishes here once "add another" is no longer
+            # offered — otherwise it's the user's choice on this very
+            # submission, so not knowable yet.
+            last_step=(
+                self._quick_edit_section == "accent_light" and not offer_add_another
+            ),
         )
 
     def _current_light_preset_default(self) -> dict[str, Any]:
@@ -1691,6 +1823,10 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 errors["base"] = "buttons_required"
             else:
                 self._options["buttons"] = buttons
+
+                if self._quick_edit_section == "buttons":
+                    return self._async_finish()
+
                 return await self.async_step_scene_hold_actions()
 
         return self.async_show_form(
@@ -1699,7 +1835,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 current=self._options.get("buttons"),
             ),
             errors=errors,
-            last_step=False,
+            last_step=self._quick_edit_section == "buttons",
         )
 
     async def async_step_scene_hold_actions(
