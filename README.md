@@ -252,9 +252,11 @@ Non-4B entries (and new ones from setup) also get their controlled
 entities appended to the entry's title on the plain **Settings → Devices
 & Services → Pico Link** list — for example "Kitchen Pico — Kitchen
 Lumary" instead of just "Kitchen Pico" — since that list otherwise gives
-no hint of what an entry actually controls. This updates whenever the
-entities step is submitted (including as part of any other edit), not
-retroactively for entries you don't reopen.
+no hint of what an entry actually controls. Up to 3 entity names are
+listed (by friendly name where known), with any beyond that collapsed
+into "+N more". This updates whenever the entities step is submitted
+(including as part of any other edit), not retroactively for entries you
+don't reopen.
 
 Each step's button reads "Next" instead of "Submit" whenever more steps
 follow, so it's clear before you click whether you're finishing this
