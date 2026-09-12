@@ -75,7 +75,7 @@
       },
       "devices": {
         "title": "Edit Pico(s) in this entry",
-        "description": "Add or remove Picos from this entry. Only Picos of this entry's type ({pico_type}) that aren't claimed by another entry are offered; at least one must remain selected. The rest of this entry's configuration is shared by every Pico selected here.",
+        "description": "Add or remove Picos from this entry. Only Picos of this entry's type ({pico_type}) that aren't claimed by another entry are offered; at least one must remain selected. Ones in the same room as a Pico already here are marked \"Recommended\" and listed first. The rest of this entry's configuration is shared by every Pico selected here.",
         "data": {
           "device_ids": "Pico device(s)"
         }

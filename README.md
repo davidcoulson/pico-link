@@ -73,6 +73,10 @@
   entry's controlled entities are appended to its title on the plain
   integration list, since it otherwise gives no hint what an entry
   controls. See [Editing a Pico](#editing-a-pico).
+- **Same-room Pico recommendations** — when editing which Picos belong to
+  an entry, an eligible Pico sharing a room with one already added is
+  labeled "Recommended" and sorted to the top, so a matching set is easy
+  to complete. See [Editing a Pico](#editing-a-pico).
 
 ---
 
@@ -221,14 +225,18 @@ doesn't require re-walking every screen:
 
 - **Devices, entities & full setup** — the full chain: add or remove
   Picos from the entry (only Picos of this entry's type that aren't
-  claimed by another entry are offered, and at least one must remain),
-  then, for non-4B entries, the same entity picker used during setup
-  (you can even switch which domain it controls here), the timing and
-  domain-specific [options](#options), accent light / STOP light-preset
-  cycling where applicable, and for `3BRL` Picos, the custom actions
-  builder — none of which the initial add flow asks about, since the
-  defaults just work. 4B entries get the same button-action editor used
-  during setup, followed by scene hold/double-tap actions.
+  claimed by another entry are offered, and at least one must remain —
+  any offered Pico that's in the same room as one already in this entry
+  is labeled "Recommended" and listed first, since a matching set, e.g.
+  every Pico wired to the same stairway light, is usually exactly what
+  you're looking to add), then, for non-4B entries, the same entity
+  picker used during setup (you can even switch which domain it
+  controls here), the timing and domain-specific [options](#options),
+  accent light / STOP light-preset cycling where applicable, and for
+  `3BRL` Picos, the custom actions builder — none of which the initial
+  add flow asks about, since the defaults just work. 4B entries get the
+  same button-action editor used during setup, followed by scene
+  hold/double-tap actions.
 - **Timing & behavior** — just the domain-specific [options](#options)
   screen, saved as soon as you submit it.
 - **Accent light / dual-light mode** — just the accent light (or, for a

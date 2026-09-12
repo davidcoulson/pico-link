@@ -8,6 +8,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import Context, callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import selector
 from homeassistant.helpers.script import Script
@@ -901,15 +902,15 @@ def _eligible_pico_devices(
     hass: Any,
     *,
     exclude_entry_id: str | None = None,
-) -> dict[str, tuple[str, str]]:
+) -> dict[str, tuple[str, str, str | None]]:
     """
     Find Lutron Pico remotes that aren't claimed by another entry.
 
-    Returns {device_id: (display_name, pico_type)}. The Pico type is
-    read directly from the model Lutron reports, so it never needs to
-    be entered by hand and can never disagree with the hardware.
-    Passing exclude_entry_id leaves that entry's own devices eligible,
-    so an options flow can offer them back for re-selection.
+    Returns {device_id: (display_name, pico_type, area_id)}. The Pico
+    type is read directly from the model Lutron reports, so it never
+    needs to be entered by hand and can never disagree with the
+    hardware. Passing exclude_entry_id leaves that entry's own devices
+    eligible, so an options flow can offer them back for re-selection.
     """
     device_registry = dr.async_get(hass)
 
@@ -922,7 +923,7 @@ def _eligible_pico_devices(
         exclude_entry_id=exclude_entry_id,
     )
 
-    devices: dict[str, tuple[str, str]] = {}
+    devices: dict[str, tuple[str, str, str | None]] = {}
 
     for device in device_registry.devices.values():
         if not device.config_entries & lutron_entry_ids:
@@ -944,6 +945,7 @@ def _eligible_pico_devices(
         devices[device.id] = (
             device.name_by_user or device.name or device.id,
             pico_type,
+            device.area_id,
         )
 
     return devices
@@ -1016,7 +1018,7 @@ class PicoLinkConfigFlow(
                                 value=device_id,
                                 label=f"{title} ({pico_type})",
                             )
-                            for device_id, (title, pico_type) in sorted(
+                            for device_id, (title, pico_type, _area_id) in sorted(
                                 devices.items(),
                                 key=lambda item: item[1][0],
                             )
@@ -1252,6 +1254,43 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
                 return await self.async_step_entities()
 
+        # Recommend other eligible Picos of this type that share a room
+        # with one already in this entry, so a matching set (e.g. every
+        # Pico for the same stairway light) is easy to spot instead of
+        # hunting through every Pico of this type in the house.
+        area_registry = ar.async_get(self.hass)
+        reference_area_ids = {
+            eligible[device_id][2]
+            for device_id in self._device_ids
+            if device_id in eligible and eligible[device_id][2] is not None
+        }
+
+        def _is_recommended(device_id: str, area_id: str | None) -> bool:
+            return (
+                device_id not in self._device_ids
+                and area_id is not None
+                and area_id in reference_area_ids
+            )
+
+        def _option_label(
+            title: str,
+            recommended: bool,
+            area_id: str | None,
+        ) -> str:
+            if not recommended:
+                return title
+
+            area = area_registry.async_get_area(area_id) if area_id else None
+
+            return f"{title} — Recommended ({area.name})" if area else f"{title} — Recommended"
+
+        def _sort_key(
+            item: tuple[str, tuple[str, str, str | None]],
+        ) -> tuple[bool, str]:
+            device_id, (title, _pico_type, area_id) = item
+
+            return (not _is_recommended(device_id, area_id), title.casefold())
+
         schema = vol.Schema(
             {
                 vol.Required(
@@ -1266,11 +1305,15 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                         options=[
                             selector.SelectOptionDict(
                                 value=device_id,
-                                label=title,
+                                label=_option_label(
+                                    title,
+                                    _is_recommended(device_id, area_id),
+                                    area_id,
+                                ),
                             )
-                            for device_id, (title, _pico_type) in sorted(
+                            for device_id, (title, _pico_type, area_id) in sorted(
                                 eligible.items(),
-                                key=lambda item: item[1][0],
+                                key=_sort_key,
                             )
                         ],
                         mode=selector.SelectSelectorMode.DROPDOWN,
