@@ -223,12 +223,16 @@ def _watch_for_missing_entities(
         else:
             ir.async_delete_issue(hass, DOMAIN, issue_id)
 
+    @callback
+    def _handle_started(_event: Event) -> None:
+        _check()
+
     if hass.is_running:
         _check()
     else:
         hass.bus.async_listen_once(
             EVENT_HOMEASSISTANT_STARTED,
-            lambda _event: _check(),
+            _handle_started,
         )
 
     @callback
