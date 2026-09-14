@@ -95,13 +95,16 @@ class PicoConfig:
     off_hold: list[ActionConfig] = field(default_factory=list)
     stop_hold: list[ActionConfig] = field(default_factory=list)
 
-    # 3BRL only. A button's tap defers to see whether a second tap
-    # follows within DOUBLE_TAP_WINDOW_MS: two taps run this instead of
-    # the tap firing twice. A button cannot define both this and its
-    # *_hold action (see validate()).
+    # 3BRL, P2B, and 2B (ON/OFF only -- STOP is 3BRL-only, since P2B
+    # and 2B have no STOP button). A button's tap defers to see whether
+    # a second tap follows within DOUBLE_TAP_WINDOW_MS: two taps run
+    # this instead of the tap firing twice. On 3BRL a button cannot
+    # define both this and its *_hold action (see validate()); on
+    # P2B/2B this replaces that button's tap-vs-hold gesture instead of
+    # running alongside it (see profiles/gesture_timing.py).
     on_double_tap: list[ActionConfig] = field(default_factory=list)
     off_double_tap: list[ActionConfig] = field(default_factory=list)
-    stop_double_tap: list[ActionConfig] = field(default_factory=list)
+    stop_double_tap: list[ActionConfig] = field(default_factory=list)  # 3BRL only
 
     # 4B only. button_hold/button_double_tap are optional, keyed by
     # button name; a button missing from either mapping has none
@@ -585,24 +588,39 @@ async def _validate_actions(
         raise ValueError(f"{context}: {err}") from err
 
 
-async def _validate_3brl_action_field(
+_PICO_TYPE_DISPLAY_ORDER = ("P2B", "2B", "3BRL", "4B")
+
+_3BRL_ONLY: frozenset[str] = frozenset({"3BRL"})
+
+
+async def _validate_gated_action_field(
     hass: HomeAssistant,
     device_type: str,
     raw_value: Any,
     placeholders: dict[str, list[str]],
     *,
     field_name: str,
+    allowed_types: frozenset[str] = _3BRL_ONLY,
 ) -> list[ActionConfig]:
     """
-    Validate one optional 3BRL-only custom action field.
+    Validate one optional custom action field restricted to specific
+    Pico types.
 
-    Used for middle_button (STOP tap) and on_hold/off_hold/stop_hold
-    (ON/OFF/STOP hold). Entity placeholders (e.g. "lights") are
-    expanded the same way as any other custom action field.
+    Used for middle_button and on_hold/off_hold/stop_hold (3BRL-only:
+    STOP tap, and ON/OFF/STOP hold), and for on_double_tap/
+    off_double_tap (3BRL, P2B, and 2B ON/OFF double-tap -- STOP has no
+    P2B/2B equivalent, so stop_double_tap stays 3BRL-only too). Entity
+    placeholders (e.g. "lights") are expanded the same way as any other
+    custom action field.
     """
-    if device_type != "3BRL":
+    if device_type not in allowed_types:
         if raw_value not in (None, []):
-            raise ValueError(f"'{field_name}' is only valid for 3BRL Picos.")
+            allowed_label = ", ".join(
+                pico_type
+                for pico_type in _PICO_TYPE_DISPLAY_ORDER
+                if pico_type in allowed_types
+            )
+            raise ValueError(f"'{field_name}' is only valid for {allowed_label} Picos.")
 
         return []
 
@@ -942,7 +960,8 @@ async def parse_pico_config(
     )
 
     # ------------------------------------------------------------
-    # 3BRL CUSTOM ACTIONS: STOP TAP, AND ON/OFF/STOP HOLD
+    # CUSTOM ACTIONS: 3BRL STOP TAP AND ON/OFF/STOP HOLD, PLUS
+    # ON/OFF DOUBLE-TAP (3BRL, P2B, 2B)
     # ------------------------------------------------------------
 
     placeholders = {
@@ -953,7 +972,7 @@ async def parse_pico_config(
         "switches": switches,
     }
 
-    middle_button = await _validate_3brl_action_field(
+    middle_button = await _validate_gated_action_field(
         hass,
         device_type,
         device_raw.get("middle_button"),
@@ -961,7 +980,7 @@ async def parse_pico_config(
         field_name="middle_button",
     )
 
-    on_hold = await _validate_3brl_action_field(
+    on_hold = await _validate_gated_action_field(
         hass,
         device_type,
         device_raw.get("on_hold"),
@@ -969,7 +988,7 @@ async def parse_pico_config(
         field_name="on_hold",
     )
 
-    off_hold = await _validate_3brl_action_field(
+    off_hold = await _validate_gated_action_field(
         hass,
         device_type,
         device_raw.get("off_hold"),
@@ -977,7 +996,7 @@ async def parse_pico_config(
         field_name="off_hold",
     )
 
-    stop_hold = await _validate_3brl_action_field(
+    stop_hold = await _validate_gated_action_field(
         hass,
         device_type,
         device_raw.get("stop_hold"),
@@ -985,23 +1004,25 @@ async def parse_pico_config(
         field_name="stop_hold",
     )
 
-    on_double_tap = await _validate_3brl_action_field(
+    on_double_tap = await _validate_gated_action_field(
         hass,
         device_type,
         device_raw.get("on_double_tap"),
         placeholders,
         field_name="on_double_tap",
+        allowed_types=frozenset({"3BRL", "P2B", "2B"}),
     )
 
-    off_double_tap = await _validate_3brl_action_field(
+    off_double_tap = await _validate_gated_action_field(
         hass,
         device_type,
         device_raw.get("off_double_tap"),
         placeholders,
         field_name="off_double_tap",
+        allowed_types=frozenset({"3BRL", "P2B", "2B"}),
     )
 
-    stop_double_tap = await _validate_3brl_action_field(
+    stop_double_tap = await _validate_gated_action_field(
         hass,
         device_type,
         device_raw.get("stop_double_tap"),

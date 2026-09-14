@@ -171,8 +171,8 @@
           "on_hold": "Runs in addition to the ON button's normal press behavior once held past the hold time.",
           "off_hold": "Runs in addition to the OFF button's normal press behavior once held past the hold time.",
           "stop_hold": "Runs in addition to the STOP button's normal press behavior once held past the hold time.",
-          "on_double_tap": "Replaces the ON button's normal tap on two quick taps. Delays resolving a single tap slightly, to confirm a second one didn't follow.",
-          "off_double_tap": "Replaces the OFF button's normal tap on two quick taps. Delays resolving a single tap slightly, to confirm a second one didn't follow.",
+          "on_double_tap": "Replaces the ON button's normal press behavior (tap, or tap-and-hold on P2B/2B) on two quick taps. Delays resolving a single press slightly, to confirm a second one didn't follow.",
+          "off_double_tap": "Replaces the OFF button's normal press behavior (tap, or tap-and-hold on P2B/2B) on two quick taps. Delays resolving a single press slightly, to confirm a second one didn't follow.",
           "stop_double_tap": "Replaces the STOP button's normal tap on two quick taps. Delays resolving a single tap slightly, to confirm a second one didn't follow.",
           "test_action": "Runs the picked action immediately with what's filled in now, without leaving this step or saving."
         }

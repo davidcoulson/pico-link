@@ -713,63 +713,71 @@ def _test_action_field(labels: dict[str, str]) -> selector.SelectSelector:
 
 
 def _custom_actions_schema(
+    pico_type: str,
     current: dict[str, Any] | None = None,
 ) -> vol.Schema:
     """
-    3BRL only: the STOP-tap action, plus ON/OFF/STOP hold and double-tap actions.
+    3BRL: the STOP-tap action, plus ON/OFF/STOP hold and double-tap
+    actions. P2B/2B: just ON/OFF double-tap actions (they have no STOP
+    button, and hold is already their built-in tap-vs-hold gesture).
 
     A button's hold and double-tap fields are mutually exclusive
     (checked on submit — see PicoLinkOptionsFlow.async_step_custom_actions).
     """
     current = current or {}
 
-    fields: dict[Any, Any] = {
-        vol.Optional(
-            "middle_button",
-            default=list(current.get("middle_button", [])),
-        ): selector.ActionSelector(),
-        vol.Optional(
-            "on_hold",
-            default=list(current.get("on_hold", [])),
-        ): selector.ActionSelector(),
-        vol.Optional(
-            "off_hold",
-            default=list(current.get("off_hold", [])),
-        ): selector.ActionSelector(),
-        vol.Optional(
-            "stop_hold",
-            default=list(current.get("stop_hold", [])),
-        ): selector.ActionSelector(),
-        vol.Optional(
-            "on_double_tap",
-            default=list(current.get("on_double_tap", [])),
-        ): selector.ActionSelector(),
-        vol.Optional(
-            "off_double_tap",
-            default=list(current.get("off_double_tap", [])),
-        ): selector.ActionSelector(),
-        vol.Optional(
-            "stop_double_tap",
-            default=list(current.get("stop_double_tap", [])),
-        ): selector.ActionSelector(),
-    }
+    fields: dict[Any, Any] = {}
+    test_labels: dict[str, str] = {}
+
+    if pico_type == "3BRL":
+        fields[
+            vol.Optional(
+                "middle_button",
+                default=list(current.get("middle_button", [])),
+            )
+        ] = selector.ActionSelector()
+        test_labels["middle_button"] = "STOP actions"
+
+        for field_name, label in (
+            ("on_hold", "ON hold actions"),
+            ("off_hold", "OFF hold actions"),
+            ("stop_hold", "STOP hold actions"),
+        ):
+            fields[
+                vol.Optional(
+                    field_name,
+                    default=list(current.get(field_name, [])),
+                )
+            ] = selector.ActionSelector()
+            test_labels[field_name] = label
+
+    for field_name, label in (
+        ("on_double_tap", "ON double-tap actions"),
+        ("off_double_tap", "OFF double-tap actions"),
+    ):
+        fields[
+            vol.Optional(
+                field_name,
+                default=list(current.get(field_name, [])),
+            )
+        ] = selector.ActionSelector()
+        test_labels[field_name] = label
+
+    if pico_type == "3BRL":
+        fields[
+            vol.Optional(
+                "stop_double_tap",
+                default=list(current.get("stop_double_tap", [])),
+            )
+        ] = selector.ActionSelector()
+        test_labels["stop_double_tap"] = "STOP double-tap actions"
 
     fields[
         vol.Optional(
             "test_action",
             default=_TEST_ACTION_NONE,
         )
-    ] = _test_action_field(
-        {
-            "middle_button": "STOP actions",
-            "on_hold": "ON hold actions",
-            "off_hold": "OFF hold actions",
-            "stop_hold": "STOP hold actions",
-            "on_double_tap": "ON double-tap actions",
-            "off_double_tap": "OFF double-tap actions",
-            "stop_double_tap": "STOP double-tap actions",
-        }
-    )
+    ] = _test_action_field(test_labels)
 
     return vol.Schema(fields)
 
@@ -1111,9 +1119,9 @@ class PicoLinkConfigFlow(
 # ================================================================
 # OPTIONS FLOW (edit an existing Pico)
 #
-# Editing still exposes the timing/behavior options and the 3BRL STOP
-# button, which the initial add flow skips in favor of sensible
-# defaults.
+# Editing still exposes the timing/behavior options, the 3BRL STOP
+# button, and ON/OFF double-tap actions (3BRL, P2B, 2B), which the
+# initial add flow skips in favor of sensible defaults.
 # ================================================================
 
 
@@ -1184,7 +1192,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         if domain == "light" and self._type in ACCENT_LIGHT_PICO_TYPES:
             options.append("accent_light_quick")
 
-        if self._type == "3BRL":
+        if self._type in ("3BRL", "P2B", "2B"):
             options.append("custom_actions")
 
         if self._type == "4B":
@@ -1387,7 +1395,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             if self._type in ACCENT_LIGHT_PICO_TYPES and self._domain == "light":
                 return await self.async_step_accent_light()
 
-            if self._type == "3BRL":
+            if self._type in ("3BRL", "P2B", "2B"):
                 return await self.async_step_custom_actions()
 
             return self._async_finish()
@@ -1400,14 +1408,11 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             ),
             description_placeholders={"domain": self._domain},
             # Mirrors the branching just above: a quick edit always
-            # finishes here; otherwise 3BRL always continues to
-            # accent_light or custom_actions, and light-domain P2B/2B
-            # always continues to accent_light — every other case
-            # finishes here.
-            last_step=(
-                self._quick_edit_section == "options"
-                or (self._type != "3BRL" and self._domain != "light")
-            ),
+            # finishes here; every non-4B type (the only kind that
+            # reaches this step) always continues on to accent_light or
+            # custom_actions otherwise, so this step is never the last
+            # one outside a quick edit.
+            last_step=self._quick_edit_section == "options",
         )
 
     async def async_step_accent_light(
@@ -1443,6 +1448,9 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
                 if self._type == "3BRL":
                     return await self.async_step_light_presets()
+
+                if self._type in ("P2B", "2B"):
+                    return await self.async_step_custom_actions()
 
                 return self._async_finish()
 
@@ -1500,7 +1508,10 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
             self._options["accent_light_presets"] = self._accent_presets
 
-            if self._type == "3BRL" and self._quick_edit_section != "accent_light":
+            if (
+                self._type in ("3BRL", "P2B", "2B")
+                and self._quick_edit_section != "accent_light"
+            ):
                 return await self.async_step_custom_actions()
 
             return self._async_finish()
@@ -1522,15 +1533,12 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 offer_remove=self._accent_preset_read_index < len(existing),
             ),
             description_placeholders={"preset_number": str(preset_number)},
-            # A quick "accent light" edit and P2B/2B both finish here once
-            # "add another" is no longer offered (at MAX_ACCENT_PRESETS);
-            # a full-chain 3BRL always continues to custom_actions after
-            # presets are done. Otherwise it's the user's choice on this
-            # very submission, so not knowable yet.
-            last_step=(
-                self._quick_edit_section == "accent_light"
-                or self._type != "3BRL"
-            )
+            # A quick "accent light" edit finishes here once "add
+            # another" is no longer offered (at MAX_ACCENT_PRESETS); a
+            # full-chain edit always continues to custom_actions once
+            # presets are done. Otherwise it's the user's choice on
+            # this very submission, so not knowable yet.
+            last_step=(self._quick_edit_section == "accent_light")
             and not offer_add_another,
         )
 
@@ -1791,7 +1799,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
-        """3BRL only: the STOP-tap action, plus ON/OFF/STOP hold and double-tap actions."""
+        """3BRL: STOP-tap plus ON/OFF/STOP hold and double-tap actions. P2B/2B: just ON/OFF double-tap."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -1845,6 +1853,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="custom_actions",
             data_schema=_custom_actions_schema(
+                self._type,
                 current=self._custom_actions_prefill or self._options,
             ),
             errors=errors,

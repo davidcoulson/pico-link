@@ -214,3 +214,165 @@ class HoldDoubleTapGestures:
 
         if task and not task.done():
             task.cancel()
+
+
+class OnOffDoubleTapGestures:
+    """
+    Shared ON/OFF double-tap wrapper for Pico types whose domain
+    actions already implement their own tap-vs-hold timing for ON and
+    OFF (P2B, 2B) -- see LightActions._supports_onoff_hold() and its
+    cover/media_player equivalents.
+
+    Unlike HoldDoubleTapGestures (used by 3BRL, whose ON/OFF have no
+    built-in hold behavior of their own to protect), a double tap here
+    has to compose with that existing tap-vs-hold timing rather than
+    replace it, since the domain layer still needs to see the real
+    press to time a hold ramp when the button isn't double-tapped. So
+    instead of running its own tap logic, this mixin defers
+    *forwarding* the press to the domain layer:
+
+    - With no double-tap action configured for a button, its press and
+      release are forwarded immediately, exactly as if this mixin
+      didn't exist.
+    - With one configured, the first press opens a
+      DOUBLE_TAP_WINDOW_MS window instead of being forwarded right
+      away. A second press inside that window fires the double-tap
+      action instead -- the whole gesture (both presses) is swallowed
+      and never reaches the domain layer, so a double tap replaces
+      that button's tap/hold behavior rather than running alongside
+      it. If the window elapses unmatched, the original press (and the
+      release too, if it already happened) is forwarded normally, and
+      the domain layer's own tap-vs-hold timing takes over exactly as
+      usual from there -- delayed by the window, but otherwise
+      unaffected.
+
+    Subclasses implement _double_tap_actions_for(button) (returning
+    that button's configured action list, or an empty one) and a
+    _task_prefix() for readable task names, and call
+    _handle_double_tap_press / _handle_double_tap_release from their
+    own handle_press/handle_release for "on" and "off", passing that
+    button's real press_fn/release_fn.
+    """
+
+    def __init__(self, controller: "PicoController") -> None:
+        self._ctrl = controller
+
+        self._window_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._window_generations: dict[str, int] = {}
+        self._press_forwarded: dict[str, bool] = {}
+        self._released_early: dict[str, bool] = {}
+        self._double_tap_resolved: dict[str, bool] = {}
+
+    def _double_tap_actions_for(self, button: str) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def _task_prefix(self) -> str:
+        raise NotImplementedError
+
+    # -------------------------------------------------------------
+    # PRESS / RELEASE ENTRY POINTS
+    # -------------------------------------------------------------
+
+    def _handle_double_tap_press(
+        self,
+        button: str,
+        press_fn: Callable[[], None],
+        release_fn: Callable[[], None],
+    ) -> None:
+        if not self._double_tap_actions_for(button):
+            press_fn()
+            return
+
+        if button in self._window_tasks:
+            # Second press inside the window: a double tap. The first
+            # press was never forwarded, so there's nothing to undo.
+            self._cancel_window(button)
+            self._double_tap_resolved[button] = True
+
+            self._ctrl.create_task(
+                self._ctrl.utils.execute_button_action(
+                    self._double_tap_actions_for(button),
+                    name=f"pico_link_{button}_double_tap",
+                ),
+                f"{self._task_prefix()}-{button}-double-tap",
+            )
+            return
+
+        self._press_forwarded[button] = False
+        self._released_early[button] = False
+        self._double_tap_resolved[button] = False
+
+        generation = self._window_generations.get(button, 0) + 1
+        self._window_generations[button] = generation
+
+        self._window_tasks[button] = self._ctrl.create_task(
+            self._double_tap_window(
+                button,
+                press_fn,
+                release_fn,
+                generation,
+            ),
+            f"{self._task_prefix()}-{button}-double-tap-window",
+        )
+
+    def _handle_double_tap_release(
+        self,
+        button: str,
+        press_fn: Callable[[], None],
+        release_fn: Callable[[], None],
+    ) -> None:
+        if not self._double_tap_actions_for(button):
+            release_fn()
+            return
+
+        if self._double_tap_resolved.pop(button, False):
+            # This release belongs to a press already resolved as a
+            # double tap; the domain layer never saw the press.
+            return
+
+        if button in self._window_tasks:
+            # Window still open: note the early release. The window
+            # coroutine forwards both press and release once it
+            # expires, so the domain layer sees a normal quick tap.
+            self._released_early[button] = True
+            return
+
+        if self._press_forwarded.pop(button, False):
+            release_fn()
+
+    # -------------------------------------------------------------
+    # DOUBLE-TAP WINDOW
+    # -------------------------------------------------------------
+
+    async def _double_tap_window(
+        self,
+        button: str,
+        press_fn: Callable[[], None],
+        release_fn: Callable[[], None],
+        generation: int,
+    ) -> None:
+        """Forward this press once the double-tap window elapses unmatched."""
+        try:
+            await asyncio.sleep(DOUBLE_TAP_WINDOW_MS / 1000)
+
+            if self._window_generations.get(button) != generation:
+                return
+
+            self._window_tasks.pop(button, None)
+            self._press_forwarded[button] = True
+            press_fn()
+
+            if self._released_early.pop(button, False):
+                self._press_forwarded[button] = False
+                release_fn()
+        except asyncio.CancelledError:
+            # Expected when a second press arrives within the window.
+            pass
+
+    def _cancel_window(self, button: str) -> None:
+        self._window_generations[button] = self._window_generations.get(button, 0) + 1
+
+        task = self._window_tasks.pop(button, None)
+
+        if task and not task.done():
+            task.cancel()
