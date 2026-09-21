@@ -16,6 +16,7 @@ from homeassistant.helpers.entity_registry import EVENT_ENTITY_REGISTRY_UPDATED
 from .config import parse_pico_config
 from .const import DOMAIN
 from .controller import PicoController
+from .memory import EntryMemory, PicoLinkStore
 
 type PicoLinkConfigEntry = ConfigEntry[list[PicoController]]
 
@@ -66,6 +67,15 @@ async def async_setup_entry(
     """Set up every identically-configured Pico in a config entry."""
     controllers: list[PicoController] = []
 
+    store: PicoLinkStore | None = hass.data.get(DOMAIN)
+
+    if store is None:
+        store = PicoLinkStore(hass)
+        await store.async_load()
+        hass.data[DOMAIN] = store
+
+    memory = EntryMemory(store, entry.entry_id)
+
     for device_id in _entry_device_ids(entry):
         device_raw = {
             "device_id": device_id,
@@ -94,6 +104,7 @@ async def async_setup_entry(
         controller = PicoController(
             hass,
             pico_config,
+            memory,
         )
 
         await controller.async_start()
@@ -263,6 +274,20 @@ async def async_unload_entry(
     ir.async_delete_issue(hass, DOMAIN, _pico_entity_missing_issue_id(entry.entry_id))
 
     return True
+
+
+async def async_remove_entry(
+    hass: HomeAssistant,
+    entry: PicoLinkConfigEntry,
+) -> None:
+    """Forget a deleted entry's remembered state."""
+    store: PicoLinkStore | None = hass.data.get(DOMAIN)
+
+    if store is None:
+        store = PicoLinkStore(hass)
+        await store.async_load()
+
+    store.remove_entry(entry.entry_id)
 
 
 async def _async_update_listener(

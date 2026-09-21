@@ -79,7 +79,8 @@
 - **3BRL dual-light scenes** — with an accent light configured, a 3BRL's
   ON selects the center lights, STOP selects the accent light, OFF turns
   everything off, and RAISE/LOWER cycle the accent light's effects while
-  it's on (or dim the center lights otherwise). See
+  it's on (or dim the center lights otherwise). The last effect picked is
+  remembered across HA restarts and light reboots. See
   [Dual-light mode](#dual-light-mode).
 - **Same-room Pico recommendations** — when editing which Picos belong to
   an entry, an eligible Pico sharing a room with one already added is
@@ -384,6 +385,18 @@ accent light:
 | OFF tap     | Turn on `accent_lights` at the current preset; turn off `lights`. A second OFF tap while the accent light is already on advances to the next preset instead of switching anything off | Turn off both `lights` and `accent_lights` |
 | OFF hold    | Ramp `lights` brightness downward; once it bottoms out at `light_low_pct`, switches to `accent_lights` at the current preset instead of just stopping | Not applicable |
 | RAISE/LOWER | —                                                                 | While the accent light is showing: step to the next/previous effect in its effect list (alphabetical, wrapping around; tap only, no ramp). Otherwise: step/ramp `lights` brightness as usual |
+
+On a 3BRL, the effect you last picked with RAISE/LOWER is remembered —
+shared by every Pico in the entry and saved to disk, so it survives a Home
+Assistant restart — and the next STOP from the center lights (or from off)
+returns to it instead of the preset's effect, at the preset's brightness.
+Because STOP always sends the effect explicitly, a light that rebooted in
+the meantime still comes back on the right effect. Pressing STOP again
+while the accent light is already on switches to the (next) preset and
+forgets the remembered effect. If the light no longer offers the
+remembered effect (renamed or removed), STOP uses the preset and forgets
+the name; if the light is unavailable and can't list its effects, STOP
+uses the preset this time but keeps the name for next time.
 
 On a 3BRL, dual-light mode takes over STOP, so it can't be combined with
 custom STOP actions (`middle_button`) or STOP light-preset cycling — picking

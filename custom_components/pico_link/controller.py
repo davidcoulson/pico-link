@@ -23,6 +23,7 @@ from .const import (
     PICO_TYPE_MAP,
     SUPPORTED_BUTTONS,
 )
+from .memory import EntryMemory
 
 # Profiles
 from .profiles.base import PicoProfile
@@ -61,9 +62,13 @@ class PicoController:
         self,
         hass: HomeAssistant,
         conf: PicoConfig,
+        memory: EntryMemory,
     ) -> None:
         self.hass = hass
         self.conf = conf
+
+        # Persisted state shared by every Pico in this config entry.
+        self.memory = memory
 
         # Shared non-domain helpers.
         self.utils = SharedUtils(self)

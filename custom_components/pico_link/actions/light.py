@@ -16,6 +16,10 @@ _LOGGER = logging.getLogger(__name__)
 
 TapAction = Callable[[], None]
 
+# 3BRL dual-light mode: the effect last picked with RAISE/LOWER,
+# persisted per config entry so STOP returns to it after a restart.
+ACCENT_EFFECT_MEMORY_KEY = "accent_effect"
+
 
 class LightActions:
     """
@@ -476,15 +480,65 @@ class LightActions:
         while the accent light is already showing cycle through
         accent_light_presets instead of reapplying the same one.
         """
+        remembered: Optional[str] = None
+
+        if self._stop_selects_accent():
+            if self._accent_is_showing():
+                # Another STOP while the accent light is already on picks
+                # the next preset, which also drops the remembered effect.
+                self.ctrl.memory.set(ACCENT_EFFECT_MEMORY_KEY, None)
+            else:
+                self._accent_preset_index = None
+                remembered = self._remembered_accent_effect()
+
         self._clear_brightness_target()
         self._advance_accent_preset()
         self._set_selection(accent=True)
-        self._target_effect = None
+
+        data = self._accent_light_data()
+
+        if remembered:
+            data.pop("rgb_color", None)
+            data.pop("color_temp_kelvin", None)
+            data["effect"] = remembered
+
+        # Let a RAISE/LOWER right after STOP step from what's about to
+        # show, before the light reports it.
+        self._target_effect = data.get("effect") or None
+        self._effect_updated_at = time.monotonic()
 
         self.ctrl.create_task(
-            self._switch_to_accent(),
+            self._switch_to_accent(data),
             task_name,
         )
+
+    def _remembered_accent_effect(self) -> Optional[str]:
+        """
+        Return the last effect picked with RAISE/LOWER, if the light still has it.
+
+        A name the light no longer offers is forgotten. If the light
+        can't report its effects right now (e.g. unavailable while it
+        reboots), the preset is used this time but the name is kept.
+        """
+        effect = self.ctrl.memory.get(ACCENT_EFFECT_MEMORY_KEY)
+
+        if not effect:
+            return None
+
+        effects = self._accent_effect_list()
+
+        if effect in effects:
+            return effect
+
+        if effects:
+            _LOGGER.debug(
+                "Remembered accent effect %r is no longer offered by %s; using the preset",
+                effect,
+                self.ctrl.conf.accent_lights[0],
+            )
+            self.ctrl.memory.set(ACCENT_EFFECT_MEMORY_KEY, None)
+
+        return None
 
     async def _switch_to_center(self, percentage: int) -> None:
         """Turn on the center light(s) and turn off the accent light(s)."""
@@ -493,11 +547,11 @@ class LightActions:
             self._turn_off_accent(),
         )
 
-    async def _switch_to_accent(self) -> None:
+    async def _switch_to_accent(self, data: Optional[dict[str, Any]] = None) -> None:
         """Turn off the center light(s) and turn on the accent light(s)."""
         await asyncio.gather(
             self._turn_off(),
-            self._turn_on_accent(),
+            self._turn_on_accent(data),
         )
 
     async def _all_off(self) -> None:
@@ -506,8 +560,8 @@ class LightActions:
             self._turn_off_accent(),
         )
 
-    async def _turn_on_accent(self) -> None:
-        data = self._accent_light_data()
+    async def _turn_on_accent(self, data: Optional[dict[str, Any]] = None) -> None:
+        data = dict(data) if data is not None else self._accent_light_data()
         data.update(self._transition_data(turning_on=True))
 
         await self.ctrl.utils.call_service_for_entities(
@@ -585,6 +639,7 @@ class LightActions:
         effect = effects[index]
         self._target_effect = effect
         self._effect_updated_at = time.monotonic()
+        self.ctrl.memory.set(ACCENT_EFFECT_MEMORY_KEY, effect)
 
         self.ctrl.create_task(
             self.ctrl.utils.call_service_for_entities(
