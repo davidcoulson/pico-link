@@ -54,6 +54,10 @@ class EntryMemory:
         self._store = store
         self._entry_id = entry_id
 
+        # Shared by the entry's Picos but not persisted; starts empty
+        # after a restart or reload.
+        self.runtime: dict[str, Any] = {}
+
     def get(self, key: str) -> Any:
         return self._store.get(self._entry_id, key)
 

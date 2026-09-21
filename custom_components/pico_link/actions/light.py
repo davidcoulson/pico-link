@@ -20,6 +20,11 @@ TapAction = Callable[[], None]
 # persisted per config entry so STOP returns to it after a restart.
 ACCENT_EFFECT_MEMORY_KEY = "accent_effect"
 
+# 3BRL dual-light mode: which light the entry's Picos last selected
+# (True = accent, False = center/off) and when. Runtime only.
+SELECTION_KEY = "accent_selected"
+SELECTION_AT_KEY = "accent_selected_at"
+
 
 class LightActions:
     """
@@ -98,12 +103,6 @@ class LightActions:
         # whenever the light is turned on or off via ON/OFF.
         self._light_preset_index: Optional[int] = None
 
-        # 3BRL dual-light mode: which light this Pico last selected, so
-        # a RAISE/LOWER right after STOP/ON/OFF doesn't depend on the
-        # lights having already reported their new state.
-        self._accent_selected = False
-        self._selection_updated_at = 0.0
-
         # 3BRL dual-light mode: the most recently requested accent
         # effect, for rapid RAISE/LOWER taps (same idea as the
         # brightness target above).
@@ -127,32 +126,49 @@ class LightActions:
         return self._dual_light_mode() and not self._supports_onoff_hold()
 
     def _set_selection(self, *, accent: bool) -> None:
-        self._accent_selected = accent
-        self._selection_updated_at = time.monotonic()
+        """Record which light the entry's Picos last selected (ON/STOP/OFF)."""
+        runtime = self.ctrl.memory.runtime
+        runtime[SELECTION_KEY] = accent
+        runtime[SELECTION_AT_KEY] = time.monotonic()
 
         if not accent:
             self._target_effect = None
 
     def _accent_is_showing(self) -> bool:
         """
-        Return True when RAISE/LOWER should cycle accent effects.
+        Return True when the accent light is the currently selected light.
 
-        Trusts this Pico's own recent STOP/ON/OFF for a few seconds,
-        then falls back to the lights' reported state, so a change made
-        elsewhere (the app, an automation) is still respected.
+        Decides from the last ON/STOP/OFF on any of this entry's Picos
+        rather than the accent light's reported state, since some
+        lights (e.g. Govee) report stale on/off states for a while after
+        a command. The center light(s) turning on elsewhere (the app, an
+        automation) still overrides an accent selection. Falls back to
+        the reported states only when nothing has been selected yet,
+        e.g. right after a restart.
         """
         if not self._stop_selects_accent():
             return False
 
-        if time.monotonic() - self._selection_updated_at <= self.TARGET_CACHE_SECONDS:
-            return self._accent_selected
-
-        accent = self.ctrl.hass.states.get(self.ctrl.conf.accent_lights[0])
+        runtime = self.ctrl.memory.runtime
+        selected = runtime.get(SELECTION_KEY)
         center = self.ctrl.utils.get_entity_state()
+        center_on = bool(center and center.state == "on")
 
-        return bool(accent and accent.state == "on") and not (
-            center and center.state == "on"
-        )
+        if selected is None:
+            accent = self.ctrl.hass.states.get(self.ctrl.conf.accent_lights[0])
+            return bool(accent and accent.state == "on") and not center_on
+
+        if not selected:
+            return False
+
+        # Right after STOP the center light may not have reported off yet.
+        if (
+            time.monotonic() - runtime.get(SELECTION_AT_KEY, 0.0)
+            <= self.TARGET_CACHE_SECONDS
+        ):
+            return True
+
+        return not center_on
 
     def _transition_data(
         self,
@@ -1017,7 +1033,5 @@ class LightActions:
         self._clear_brightness_target()
         self._accent_preset_index = None
         self._light_preset_index = None
-        self._accent_selected = False
-        self._selection_updated_at = 0.0
         self._target_effect = None
         self._effect_updated_at = 0.0

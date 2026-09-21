@@ -401,9 +401,12 @@ uses the preset this time but keeps the name for next time.
 On a 3BRL, dual-light mode takes over STOP, so it can't be combined with
 custom STOP actions (`middle_button`) or STOP light-preset cycling — picking
 an accent light clears any saved STOP actions. Whether the accent light is
-"showing" follows the Pico's own last ON/STOP/OFF for a couple of seconds,
-then the lights' reported state, so switching lights from the app or an
-automation is respected too. A 3BRL's ON/OFF can still separately use
+"showing" follows the last ON/STOP/OFF on any Pico in the entry, not the
+accent light's reported state — some lights (Govee, for one) report stale
+on/off states for a while after a command. The center light(s) being
+turned on elsewhere (the app, an automation) still takes over, and right
+after a Home Assistant restart, before any button is pressed, the lights'
+reported states are used. A 3BRL's ON/OFF can still separately use
 `on_hold`/`off_hold`/`on_double_tap`/`off_double_tap` alongside dual-light
 mode — those actions run in addition to (hold) or instead of (double-tap)
 the tap behavior above.
