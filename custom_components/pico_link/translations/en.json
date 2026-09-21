@@ -112,14 +112,14 @@
       },
       "accent_light": {
         "title": "Accent light",
-        "description": "Optional (P2B, 2B, and 3BRL only): pick an accent light (e.g. a ring or edge light) to enable dual-light mode. ON switches to the Lights configured above; OFF switches to this accent light. The two are never on at the same time. Leave empty to disable dual-light mode.",
+        "description": "Optional (P2B, 2B, and 3BRL only): pick an accent light (e.g. a ring or edge light) to enable dual-light mode. ON switches to the Lights configured above. On a P2B/2B, OFF switches to this accent light. On a 3BRL, STOP switches to it (replacing any custom STOP actions), OFF turns both off, and RAISE/LOWER cycle its effects while it's on. The two are never on at the same time. Leave empty to disable dual-light mode.",
         "data": {
           "accent_lights": "Accent lights"
         }
       },
       "accent_light_appearance": {
         "title": "Accent light appearance (preset {preset_number})",
-        "description": "Choose what the accent light looks like for preset {preset_number}. Repeated OFF taps cycle through every preset you add, in order.",
+        "description": "Choose what the accent light looks like for preset {preset_number}. Repeated OFF taps (P2B/2B) or STOP taps (3BRL) cycle through every preset you add, in order.",
         "data": {
           "accent_light_rgb_color": "Accent light color",
           "accent_light_color_mode": "Accent light color mode",
@@ -167,7 +167,7 @@
           "test_action": "Test an action"
         },
         "data_description": {
-          "middle_button": "Runs on every STOP tap, replacing the default STOP behavior for this domain. Unavailable if STOP light-preset cycling is enabled on the previous step.",
+          "middle_button": "Runs on every STOP tap, replacing the default STOP behavior for this domain. Unavailable if STOP light-preset cycling or an accent light (dual-light mode) is configured.",
           "on_hold": "Runs in addition to the ON button's normal press behavior once held past the hold time.",
           "off_hold": "Runs in addition to the OFF button's normal press behavior once held past the hold time.",
           "stop_hold": "Runs in addition to the STOP button's normal press behavior once held past the hold time.",
@@ -221,7 +221,8 @@
       "hold_and_double_tap_conflict": "A button can use hold actions or double-tap actions, not both — remove one before continuing.",
       "test_action_failed": "The test action failed to run. Check the log for details; your other entries here were kept.",
       "accent_light_overlap": "An accent light can't also be one of the lights configured above — pick a different accent light, or remove it from the Lights step.",
-      "middle_button_light_presets_conflict": "STOP actions can't be combined with the light-preset cycling configured on the previous step — clear one or the other before continuing."
+      "middle_button_light_presets_conflict": "STOP actions can't be combined with the light-preset cycling configured on the previous step — clear one or the other before continuing.",
+      "middle_button_accent_light_conflict": "On a 3BRL, STOP switches to the accent light in dual-light mode, so it can't also run STOP actions — clear the STOP actions, or remove the accent light."
     }
   },
   "issues": {

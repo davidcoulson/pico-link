@@ -50,6 +50,18 @@ class LightActions:
         STOP tap    -> execute middle_button actions; otherwise, if
                        light_presets is configured, cycle `lights`
                        through it instead; otherwise no-op
+
+    3BRL dual-light mode (accent_lights configured):
+        ON tap      -> switch to the center light(s) at light_on_pct;
+                       turn off the accent light(s)
+        STOP tap    -> switch to the accent light(s) at the current
+                       preset; turn off the center light(s). Repeated
+                       taps cycle through accent_light_presets.
+        OFF tap     -> turn off both the center and accent light(s)
+        RAISE/LOWER -> while the accent light is showing, step to the
+                       next/previous effect in its effect list (tap
+                       only, no ramp); otherwise adjust the center
+                       light(s) brightness as usual
     """
 
     MAX_RAMP_STEPS = 50
@@ -82,6 +94,18 @@ class LightActions:
         # whenever the light is turned on or off via ON/OFF.
         self._light_preset_index: Optional[int] = None
 
+        # 3BRL dual-light mode: which light this Pico last selected, so
+        # a RAISE/LOWER right after STOP/ON/OFF doesn't depend on the
+        # lights having already reported their new state.
+        self._accent_selected = False
+        self._selection_updated_at = 0.0
+
+        # 3BRL dual-light mode: the most recently requested accent
+        # effect, for rapid RAISE/LOWER taps (same idea as the
+        # brightness target above).
+        self._target_effect: Optional[str] = None
+        self._effect_updated_at = 0.0
+
     # =============================================================
     # PROFILE HELPERS
     # =============================================================
@@ -93,6 +117,38 @@ class LightActions:
     def _dual_light_mode(self) -> bool:
         """Return True when ON/OFF switch between center and accent lights."""
         return bool(self.ctrl.conf.accent_lights)
+
+    def _stop_selects_accent(self) -> bool:
+        """Return True for 3BRL dual-light mode (STOP selects the accent light)."""
+        return self._dual_light_mode() and not self._supports_onoff_hold()
+
+    def _set_selection(self, *, accent: bool) -> None:
+        self._accent_selected = accent
+        self._selection_updated_at = time.monotonic()
+
+        if not accent:
+            self._target_effect = None
+
+    def _accent_is_showing(self) -> bool:
+        """
+        Return True when RAISE/LOWER should cycle accent effects.
+
+        Trusts this Pico's own recent STOP/ON/OFF for a few seconds,
+        then falls back to the lights' reported state, so a change made
+        elsewhere (the app, an automation) is still respected.
+        """
+        if not self._stop_selects_accent():
+            return False
+
+        if time.monotonic() - self._selection_updated_at <= self.TARGET_CACHE_SECONDS:
+            return self._accent_selected
+
+        accent = self.ctrl.hass.states.get(self.ctrl.conf.accent_lights[0])
+        center = self.ctrl.utils.get_entity_state()
+
+        return bool(accent and accent.state == "on") and not (
+            center and center.state == "on"
+        )
 
     def _transition_data(
         self,
@@ -329,7 +385,9 @@ class LightActions:
         task_name: str = "light-turn-off",
     ) -> None:
         """Resolve the OFF tap action per dual-light mode / light_on_off_toggle."""
-        if self._dual_light_mode():
+        if self._stop_selects_accent():
+            self._schedule_all_off(task_name)
+        elif self._dual_light_mode():
             self._schedule_switch_to_accent(task_name)
         elif self.ctrl.conf.light_on_off_toggle:
             self._schedule_toggle(task_name)
@@ -386,9 +444,24 @@ class LightActions:
         percentage = self.ctrl.conf.light_on_pct
         self._set_brightness_target(percentage)
         self._accent_preset_index = None
+        self._set_selection(accent=False)
 
         self.ctrl.create_task(
             self._switch_to_center(percentage),
+            task_name,
+        )
+
+    def _schedule_all_off(
+        self,
+        task_name: str = "light-all-off",
+    ) -> None:
+        """Turn off both the center and accent light(s) (3BRL dual-light OFF)."""
+        self._set_brightness_target(0)
+        self._accent_preset_index = None
+        self._set_selection(accent=False)
+
+        self.ctrl.create_task(
+            self._all_off(),
             task_name,
         )
 
@@ -405,6 +478,8 @@ class LightActions:
         """
         self._clear_brightness_target()
         self._advance_accent_preset()
+        self._set_selection(accent=True)
+        self._target_effect = None
 
         self.ctrl.create_task(
             self._switch_to_accent(),
@@ -425,6 +500,12 @@ class LightActions:
             self._turn_on_accent(),
         )
 
+    async def _all_off(self) -> None:
+        await asyncio.gather(
+            self._turn_off(),
+            self._turn_off_accent(),
+        )
+
     async def _turn_on_accent(self) -> None:
         data = self._accent_light_data()
         data.update(self._transition_data(turning_on=True))
@@ -442,6 +523,77 @@ class LightActions:
             self._transition_data(turning_on=False),
             self.ctrl.conf.accent_lights,
             domain="light",
+        )
+
+    # =============================================================
+    # 3BRL DUAL-LIGHT EFFECT CYCLING
+    # =============================================================
+
+    def _accent_effect_list(self) -> list[str]:
+        """Return the accent light's effects, in the same order as the effect picker."""
+        state = self.ctrl.hass.states.get(self.ctrl.conf.accent_lights[0])
+
+        if not state:
+            return []
+
+        effects = state.attributes.get("effect_list") or []
+
+        return sorted(
+            (
+                effect
+                for effect in effects
+                if isinstance(effect, str) and effect.casefold() not in ("none", "off")
+            ),
+            key=str.casefold,
+        )
+
+    def _current_accent_effect(self) -> Optional[str]:
+        """Return the recently requested effect, or resynchronize from HA."""
+        if (
+            self._target_effect is not None
+            and time.monotonic() - self._effect_updated_at <= self.TARGET_CACHE_SECONDS
+        ):
+            return self._target_effect
+
+        state = self.ctrl.hass.states.get(self.ctrl.conf.accent_lights[0])
+
+        return state.attributes.get("effect") if state else None
+
+    def _schedule_effect_step(
+        self,
+        direction: int,
+        *,
+        task_name: str,
+    ) -> None:
+        """Step the accent light(s) to the next/previous effect, wrapping around."""
+        effects = self._accent_effect_list()
+
+        if not effects:
+            _LOGGER.debug(
+                "Accent light %s reports no effects to cycle through",
+                self.ctrl.conf.accent_lights[0],
+            )
+            return
+
+        current = self._current_accent_effect()
+
+        if current in effects:
+            index = (effects.index(current) + direction) % len(effects)
+        else:
+            index = 0 if direction > 0 else len(effects) - 1
+
+        effect = effects[index]
+        self._target_effect = effect
+        self._effect_updated_at = time.monotonic()
+
+        self.ctrl.create_task(
+            self.ctrl.utils.call_service_for_entities(
+                "turn_on",
+                {"effect": effect},
+                self.ctrl.conf.accent_lights,
+                domain="light",
+            ),
+            task_name,
         )
 
     # =============================================================
@@ -536,6 +688,10 @@ class LightActions:
             )
             return
 
+        if self._stop_selects_accent():
+            self._schedule_switch_to_accent("light-stop-switch-accent")
+            return
+
         if self.ctrl.conf.light_presets:
             self._advance_light_preset()
             self.ctrl.create_task(
@@ -613,6 +769,14 @@ class LightActions:
         direction: int,
     ) -> None:
         """Perform one immediate step and arm continuous ramping."""
+        if self._accent_is_showing():
+            self._clear_gesture()
+            self._schedule_effect_step(
+                direction,
+                task_name=f"light-{button}-effect",
+            )
+            return
+
         generation = self._begin_gesture(button)
 
         self._schedule_brightness_step(
@@ -798,3 +962,7 @@ class LightActions:
         self._clear_brightness_target()
         self._accent_preset_index = None
         self._light_preset_index = None
+        self._accent_selected = False
+        self._selection_updated_at = 0.0
+        self._target_effect = None
+        self._effect_updated_at = 0.0

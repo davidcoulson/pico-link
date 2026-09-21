@@ -76,6 +76,11 @@
   entry's controlled entities are appended to its title on the plain
   integration list, since it otherwise gives no hint what an entry
   controls. See [Editing a Pico](#editing-a-pico).
+- **3BRL dual-light scenes** — with an accent light configured, a 3BRL's
+  ON selects the center lights, STOP selects the accent light, OFF turns
+  everything off, and RAISE/LOWER cycle the accent light's effects while
+  it's on (or dim the center lights otherwise). See
+  [Dual-light mode](#dual-light-mode).
 - **Same-room Pico recommendations** — when editing which Picos belong to
   an entry, an eligible Pico sharing a room with one already added is
   labeled "Recommended" and sorted to the top, so a matching set is easy
@@ -367,24 +372,28 @@ double-tap actions work.
 
 Configuring `accent_lights` (on the "Accent light" options step, shown only
 for a P2B, 2B, or 3BRL assigned to the light domain) puts it into dual-light
-mode. Instead of turning the same light on and off, ON and OFF switch
+mode. Instead of turning the same light on and off, the buttons switch
 between two separate lights — for example a center fixture and a ring/edge
 accent light:
 
-| Gesture  | P2B / 2B                                                         | 3BRL |
-| -------- | ----------------------------------------------------------------- | ---- |
-| ON tap   | Turn on `lights` at `light_on_pct`; turn off `accent_lights`       | Same |
-| ON hold  | Ramp `lights` brightness upward; turns off `accent_lights` once the hold threshold is crossed | Not applicable — RAISE/LOWER ramp `lights` instead |
-| OFF tap  | Turn on `accent_lights` at the current preset; turn off `lights`. A second OFF tap while the accent light is already on advances to the next preset instead of switching anything off | Same |
-| OFF hold | Ramp `lights` brightness downward; once it bottoms out at `light_low_pct`, switches to `accent_lights` at the current preset instead of just stopping | Not applicable |
+| Gesture     | P2B / 2B                                                         | 3BRL |
+| ----------- | ----------------------------------------------------------------- | ---- |
+| ON tap      | Turn on `lights` at `light_on_pct`; turn off `accent_lights`       | Same |
+| ON hold     | Ramp `lights` brightness upward; turns off `accent_lights` once the hold threshold is crossed | Not applicable |
+| STOP tap    | —                                                                 | Turn on `accent_lights` at the current preset; turn off `lights`. Another STOP while the accent light is on advances to the next preset |
+| OFF tap     | Turn on `accent_lights` at the current preset; turn off `lights`. A second OFF tap while the accent light is already on advances to the next preset instead of switching anything off | Turn off both `lights` and `accent_lights` |
+| OFF hold    | Ramp `lights` brightness downward; once it bottoms out at `light_low_pct`, switches to `accent_lights` at the current preset instead of just stopping | Not applicable |
+| RAISE/LOWER | —                                                                 | While the accent light is showing: step to the next/previous effect in its effect list (alphabetical, wrapping around; tap only, no ramp). Otherwise: step/ramp `lights` brightness as usual |
 
-For a 3BRL, RAISE and LOWER always ramp `lights` regardless of dual-light
-mode; ON and OFF only ever tap (they have no hold behavior of their own to
-begin with — see the 3BRL table above), so they simply select center or
-accent immediately. A 3BRL's ON/OFF can still separately use
+On a 3BRL, dual-light mode takes over STOP, so it can't be combined with
+custom STOP actions (`middle_button`) or STOP light-preset cycling — picking
+an accent light clears any saved STOP actions. Whether the accent light is
+"showing" follows the Pico's own last ON/STOP/OFF for a couple of seconds,
+then the lights' reported state, so switching lights from the app or an
+automation is respected too. A 3BRL's ON/OFF can still separately use
 `on_hold`/`off_hold`/`on_double_tap`/`off_double_tap` alongside dual-light
 mode — those actions run in addition to (hold) or instead of (double-tap)
-the center/accent switch, exactly as they would outside dual-light mode.
+the tap behavior above.
 
 A P2B/2B's ON/OFF can likewise use `on_double_tap`/`off_double_tap`
 alongside dual-light mode. Since double-tap replaces that button's tap/hold

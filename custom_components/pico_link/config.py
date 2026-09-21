@@ -71,10 +71,12 @@ class PicoConfig:
     light_transition_off: int = 0
     light_on_off_toggle: bool = False
 
-    # P2B/2B accent light configuration. A non-empty accent_lights
-    # list puts the Pico into dual-light mode: ON switches to the
-    # center light(s) in `lights`, OFF switches to these accent
-    # light(s), cycling through accent_light_presets on repeated taps.
+    # A non-empty accent_lights list puts the Pico into dual-light
+    # mode: ON switches to the center light(s) in `lights`. On P2B/2B,
+    # OFF switches to these accent light(s), cycling through
+    # accent_light_presets on repeated taps. On 3BRL, STOP does that
+    # instead, OFF turns both off, and RAISE/LOWER cycle the accent
+    # light's effects while it's showing.
     accent_lights: list[str] = field(default_factory=list)
     accent_light_presets: list[AccentPreset] = field(default_factory=lambda: [AccentPreset()])
 
@@ -223,6 +225,14 @@ class PicoConfig:
                     f"Pico {self.device_id} lists "
                     f"{', '.join(sorted(overlap))} in both 'lights' "
                     "and 'accent_lights'."
+                )
+
+            if self.type == "3BRL" and self.middle_button:
+                raise ValueError(
+                    f"Pico {self.device_id} defines both 'middle_button' "
+                    "and 'accent_lights'. On a 3BRL, STOP switches to the "
+                    "accent light(s) in dual-light mode, so it can't also "
+                    "run custom STOP actions."
                 )
 
         if self.light_presets:

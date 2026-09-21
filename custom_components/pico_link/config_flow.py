@@ -922,8 +922,12 @@ def _eligible_pico_devices(
     """
     device_registry = dr.async_get(hass)
 
-    lutron_entry_ids = {
-        entry.entry_id for entry in hass.config_entries.async_entries("lutron_caseta")
+    lutron_devices = {
+        device.id: device
+        for entry in hass.config_entries.async_entries("lutron_caseta")
+        for device in dr.async_entries_for_config_entry(
+            device_registry, entry.entry_id
+        )
     }
 
     configured_device_ids = _configured_device_ids(
@@ -933,10 +937,7 @@ def _eligible_pico_devices(
 
     devices: dict[str, tuple[str, str, str | None]] = {}
 
-    for device in device_registry.devices.values():
-        if not device.config_entries & lutron_entry_ids:
-            continue
-
+    for device in lutron_devices.values():
         if device.id in configured_device_ids:
             continue
 
@@ -1442,6 +1443,11 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
                 if accent_lights:
                     self._options.pop("light_presets", None)
+
+                    # 3BRL dual-light mode takes over STOP.
+                    if self._type == "3BRL":
+                        self._options["middle_button"] = []
+
                     return await self.async_step_accent_light_appearance()
 
                 self._options.pop("accent_light_presets", None)
@@ -1834,6 +1840,11 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                     "light_presets"
                 ):
                     errors["base"] = "middle_button_light_presets_conflict"
+                    self._custom_actions_prefill = user_input
+                elif user_input.get("middle_button") and self._options.get(
+                    "accent_lights"
+                ):
+                    errors["base"] = "middle_button_accent_light_conflict"
                     self._custom_actions_prefill = user_input
                 else:
                     for field_name in (
