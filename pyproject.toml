@@ -9,3 +9,7 @@ select = [
     "F",
     "I",
 ]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The `hass` fixture from pytest-homeassistant-custom-component is async.
+asyncio_mode = "auto"

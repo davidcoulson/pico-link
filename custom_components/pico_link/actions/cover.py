@@ -5,6 +5,9 @@ import asyncio
 import time
 from typing import TYPE_CHECKING, Any, Optional
 
+from homeassistant.components.cover import CoverEntityFeature
+from homeassistant.core import State
+
 from ..const import ON_OFF_PICO_TYPES
 
 if TYPE_CHECKING:
@@ -20,7 +23,7 @@ class CoverActions:
         ON hold  -> move continuously in the ON direction
         OFF tap  -> close fully
         OFF hold -> move continuously in the OFF direction
-        ON/OFF while moving -> stop
+        ON/OFF while moving -> stop (these Picos have no STOP button)
 
         If cover_inverted is true, the ON and OFF directions are reversed.
 
@@ -34,6 +37,10 @@ class CoverActions:
 
     STOP:
         Configured middle_button actions override the default stop action.
+
+    Covers without SET_POSITION (plain open/close) can't step, so a
+    RAISE/LOWER tap opens or closes them fully instead, and the ON tap
+    ignores cover_open_pos.
     """
 
     TARGET_CACHE_SECONDS = 2.0
@@ -71,6 +78,21 @@ class CoverActions:
             return "lower" if self.ctrl.conf.cover_inverted else "raise"
 
         return "raise" if self.ctrl.conf.cover_inverted else "lower"
+
+    def _supports_set_position(self, state: Optional[State] = None) -> bool:
+        """Return True unless the primary cover reports it can't be positioned."""
+        if state is None:
+            state = self.ctrl.utils.get_entity_state()
+
+        if not state:
+            return True
+
+        features = state.attributes.get("supported_features")
+
+        if isinstance(features, bool) or not isinstance(features, int):
+            return True
+
+        return bool(features & CoverEntityFeature.SET_POSITION)
 
     # =============================================================
     # POSITION STATE
@@ -221,7 +243,23 @@ class CoverActions:
         """Handle an ON or OFF press for every Pico profile."""
         was_holding = self._clear_gesture_state()
 
-        # A new ON/OFF press while movement is active acts as STOP.
+        if not self._supports_onoff_hold():
+            # A 3BRL has a real STOP button, so ON/OFF always mean
+            # open/close. If our own RAISE/LOWER hold is still moving
+            # the cover, stop that first so its release doesn't cancel
+            # the tap's movement.
+            if was_holding:
+                self._clear_position_target()
+                self.ctrl.create_task(
+                    self._stop_then_onoff_tap(button),
+                    f"cover-{button}-transition",
+                )
+                return
+
+            self._start_onoff_tap(button)
+            return
+
+        # P2B/2B: a new ON/OFF press while movement is active acts as STOP.
         if was_holding or self._is_moving():
             self._clear_position_target()
 
@@ -229,10 +267,6 @@ class CoverActions:
                 self._stop(),
                 "cover-stop",
             )
-            return
-
-        if not self._supports_onoff_hold():
-            self._start_onoff_tap(button)
             return
 
         self._active_button = button
@@ -268,6 +302,11 @@ class CoverActions:
             )
             return
 
+        self._start_onoff_tap(button)
+
+    async def _stop_then_onoff_tap(self, button: str) -> None:
+        """Stop continuous movement, then run the ON/OFF tap action."""
+        await self._stop(blocking=True)
         self._start_onoff_tap(button)
 
     def _start_onoff_tap(self, button: str) -> None:
@@ -355,6 +394,15 @@ class CoverActions:
         task_name: str,
     ) -> None:
         """Calculate a step synchronously and schedule its service call."""
+        if not self._supports_set_position():
+            # Can't step a plain open/close cover; a tap opens or closes it.
+            self._clear_position_target()
+            self._step_task = self.ctrl.create_task(
+                self._start_motion(button),
+                task_name,
+            )
+            return
+
         new_position = self._next_position(button)
 
         if new_position is None:
@@ -469,6 +517,10 @@ class CoverActions:
         # Continuous movement invalidates the previous optimistic target.
         self._clear_position_target()
 
+        if not self._supports_set_position():
+            await self._start_motion(button)
+            return
+
         new_position = self._next_position(button)
 
         if new_position is not None:
@@ -490,7 +542,8 @@ class CoverActions:
         """Open to the configured open position."""
         open_position = self.ctrl.conf.cover_open_pos
 
-        if open_position == 100:
+        # set_cover_position is refused for covers without SET_POSITION.
+        if open_position == 100 or not self._supports_set_position():
             await self.ctrl.utils.call_service(
                 "open_cover",
                 {},

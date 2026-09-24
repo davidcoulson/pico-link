@@ -45,6 +45,19 @@ BEHAVIOR_CLASSES = {
     "4B": Pico4ButtonScene,
 }
 
+ACTION_CLASSES: dict[str, type[DomainActions]] = {
+    "cover": CoverActions,
+    "fan": FanActions,
+    "light": LightActions,
+    "media_player": MediaPlayerActions,
+    "switch": SwitchActions,
+}
+
+
+def type_mismatch_issue_id(device_id: str) -> str:
+    """Repair issue ID for a Pico whose reported hardware type disagrees with its config."""
+    return f"type_mismatch_{device_id}"
+
 
 class PicoController:
     """
@@ -83,14 +96,12 @@ class PicoController:
         # every event received from a mismatched or unsupported Pico.
         self._last_type_error: Optional[str] = None
 
-        # Domain-level behaviors.
-        self.actions: dict[str, DomainActions] = {
-            "cover": CoverActions(self),
-            "fan": FanActions(self),
-            "light": LightActions(self),
-            "media_player": MediaPlayerActions(self),
-            "switch": SwitchActions(self),
-        }
+        # Domain-level behavior for the one configured domain (none for
+        # a 4B, whose buttons run configured actions directly).
+        domain = self.utils.entity_domain()
+        self.actions: dict[str, DomainActions] = (
+            {domain: ACTION_CLASSES[domain](self)} if domain in ACTION_CLASSES else {}
+        )
 
         # Configuration is authoritative. PicoConfig.validate() has
         # already confirmed that conf.type is a supported configured type.
@@ -301,7 +312,7 @@ class PicoController:
         return True
 
     def _type_mismatch_issue_id(self) -> str:
-        return f"type_mismatch_{self.conf.device_id}"
+        return type_mismatch_issue_id(self.conf.device_id)
 
     def _log_type_error_once(
         self,

@@ -565,6 +565,10 @@ short period instead of waiting for `current_position` to update.
 When changing direction after continuous movement, Pico Link waits for
 `stop_cover` to complete before submitting the next position command.
 
+Covers that can't be set to a position (plain open/close covers) can't be
+stepped, so a RAISE or LOWER tap opens or closes them fully instead, and
+the ON tap ignores `cover_open_pos`.
+
 ---
 
 ### Media Players
