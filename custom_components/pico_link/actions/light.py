@@ -25,6 +25,11 @@ ACCENT_EFFECT_MEMORY_KEY = "accent_effect"
 SELECTION_KEY = "accent_selected"
 SELECTION_AT_KEY = "accent_selected_at"
 
+# Dual-light mode: which accent preset is currently showing. Shared by
+# the entry's Picos (like the selection above) so STOP on any of them
+# advances the cycle instead of starting over. Runtime only.
+ACCENT_PRESET_KEY = "accent_preset_index"
+
 
 class LightActions:
     """
@@ -93,11 +98,6 @@ class LightActions:
         self._target_brightness_pct: Optional[int] = None
         self._target_updated_at = 0.0
 
-        # Dual-light mode: which accent preset is currently showing.
-        # None means the accent light isn't (to our knowledge) active,
-        # so the next switch-to-accent starts over at preset 0.
-        self._accent_preset_index: Optional[int] = None
-
         # light_presets STOP-cycling: which preset was last applied.
         # None means the next STOP starts over at preset 0; reset
         # whenever the light is turned on or off via ON/OFF.
@@ -124,6 +124,26 @@ class LightActions:
     def _stop_selects_accent(self) -> bool:
         """Return True for 3BRL dual-light mode (STOP selects the accent light)."""
         return self._dual_light_mode() and not self._supports_onoff_hold()
+
+    @property
+    def _accent_preset_index(self) -> Optional[int]:
+        """
+        Dual-light mode: which accent preset is currently showing.
+
+        None means the accent light isn't (to our knowledge) active, so
+        the next switch-to-accent starts over at preset 0. Lives in the
+        entry-shared runtime dict alongside the selection keys.
+        """
+        return self.ctrl.memory.runtime.get(ACCENT_PRESET_KEY)
+
+    @_accent_preset_index.setter
+    def _accent_preset_index(self, index: Optional[int]) -> None:
+        runtime = self.ctrl.memory.runtime
+
+        if index is None:
+            runtime.pop(ACCENT_PRESET_KEY, None)
+        else:
+            runtime[ACCENT_PRESET_KEY] = index
 
     def _set_selection(self, *, accent: bool) -> None:
         """Record which light the entry's Picos last selected (ON/STOP/OFF)."""
@@ -322,9 +342,10 @@ class LightActions:
         )
 
         if direction < 0:
-            # LOWER while the light is off should not turn it on.
-            if current_percentage == 0:
-                return 0
+            # LOWER while the light is off should not turn it on, and
+            # LOWER at or below light_low_pct should not brighten it.
+            if current_percentage <= self.ctrl.conf.light_low_pct:
+                return current_percentage
 
             new_percentage = max(
                 self.ctrl.conf.light_low_pct,
@@ -379,9 +400,19 @@ class LightActions:
         self,
         task_name: str = "light-toggle",
     ) -> None:
-        """Read current state synchronously, then schedule on or off."""
-        state = self.ctrl.utils.get_entity_state()
-        is_on = bool(state) and state.state == "on"
+        """Decide on or off from the recent target (or HA state), then schedule."""
+        # ON/OFF set the optimistic target to light_on_pct / 0, so a second
+        # tap during state lag toggles instead of repeating turn_on. Only
+        # the fresh target is trusted: an on/off-only light reports no
+        # brightness, which would otherwise read as off.
+        if (
+            self._target_brightness_pct is not None
+            and time.monotonic() - self._target_updated_at <= self.TARGET_CACHE_SECONDS
+        ):
+            is_on = self._target_brightness_pct > 0
+        else:
+            state = self.ctrl.utils.get_entity_state()
+            is_on = state is not None and state.state == "on"
 
         if is_on:
             self._schedule_turn_off(task_name)

@@ -212,9 +212,18 @@ class PicoController:
                     action,
                 )
 
+        # Every controller listens on the same global Lutron event, so
+        # without a filter each keypad press in the house would schedule
+        # a callback on every configured Pico. The filter runs inline in
+        # the bus's dispatch loop and drops other devices' events there.
+        @callback
+        def event_filter(event_data: Mapping[str, Any]) -> bool:
+            return event_data.get("device_id") == self.conf.device_id
+
         self._unsub_event = self.hass.bus.async_listen(
             PICO_EVENT_TYPE,
             handle_event,
+            event_filter=event_filter,
         )
 
         _LOGGER.debug(
@@ -361,6 +370,10 @@ class PicoController:
             )
 
         self._tasks.clear()
+
+        # Release the cached action Scripts so they drop out of Home
+        # Assistant's script registry with this controller.
+        await self.utils.async_unload_scripts()
 
     # =============================================================
     # EVENT NORMALIZATION

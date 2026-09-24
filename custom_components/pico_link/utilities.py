@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any, Optional, cast
 
@@ -30,6 +31,16 @@ class SharedUtils:
         # tap-versus-hold and ramp behavior.
         self._hold_time = self.conf.hold_time_ms / 1000.0
         self._step_time = self.conf.step_time_ms / 1000.0
+
+        # One Script per configured action list, built lazily on first
+        # use and kept for the controller's lifetime. Every top-level
+        # Script registers itself in hass.data["helpers.script"] for as
+        # long as it exists, so constructing a fresh one per button
+        # press would leak an entry there on every press. Keyed by the
+        # list's identity: every caller passes a list held on
+        # self.conf, so the key is stable and the entry also pins the
+        # list so its id can't be reused.
+        self._scripts: dict[int, tuple[list[dict[str, Any]], Script]] = {}
 
     # =============================================================
     # ENTITY RESOLUTION
@@ -187,12 +198,7 @@ class SharedUtils:
         if not actions:
             return
 
-        script = Script(
-            self.hass,
-            actions,
-            name,
-            DOMAIN,
-        )
+        script = self._script_for(actions, name)
 
         try:
             await script.async_run(context=Context())
@@ -201,3 +207,50 @@ class SharedUtils:
                 "Device %s: error running configured action sequence",
                 self.conf.device_id,
             )
+
+    def _script_for(
+        self,
+        actions: list[dict[str, Any]],
+        name: str,
+    ) -> Script:
+        """Return the cached Script for an action list, creating it on first use."""
+        cached = self._scripts.get(id(actions))
+
+        if cached is not None and cached[0] is actions:
+            return cached[1]
+
+        # Parallel mode so a repeat press arriving while a previous run
+        # is still inside a delay: (or any slow step) starts a new run
+        # instead of being refused as "Already running".
+        script = Script(
+            self.hass,
+            actions,
+            name,
+            DOMAIN,
+            logger=_LOGGER,
+            running_description=f"Pico Link {name} for device {self.conf.device_id}",
+            script_mode="parallel",
+        )
+
+        self._scripts[id(actions)] = (actions, script)
+
+        return script
+
+    async def async_unload_scripts(self) -> None:
+        """Stop and release every cached Script; called from the controller's stop path."""
+        scripts = [script for _, script in self._scripts.values()]
+        self._scripts.clear()
+
+        for script in scripts:
+            await script.async_stop()
+
+            # Script only deregisters itself from hass.data on
+            # _async_unload(), which not every Home Assistant release
+            # provides.
+            unload = getattr(script, "_async_unload", None)
+
+            if callable(unload):
+                result = unload()
+
+                if inspect.isawaitable(result):
+                    await result

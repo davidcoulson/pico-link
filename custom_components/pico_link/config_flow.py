@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Mapping
 
 import voluptuous as vol
@@ -808,6 +809,11 @@ def _scene_hold_actions_schema(
     (checked on submit — see
     PicoLinkOptionsFlow.async_step_scene_hold_actions).
     """
+    # `current` is either the saved options (nested button_hold /
+    # button_double_tap maps) or a re-submitted form (flat
+    # "<name>_hold" / "<name>_double_tap" keys, after "Test an action"
+    # or a conflict error), so prefer the flat key and fall back to
+    # the nested map.
     current = current or {}
     button_hold = current.get("button_hold") or {}
     button_double_tap = current.get("button_double_tap") or {}
@@ -821,7 +827,7 @@ def _scene_hold_actions_schema(
         fields[
             vol.Optional(
                 f"{name}_hold",
-                default=list(button_hold.get(name, [])),
+                default=list(current.get(f"{name}_hold") or button_hold.get(name, [])),
             )
         ] = selector.ActionSelector()
         test_labels[f"{name}_hold"] = f"{label} hold actions"
@@ -829,7 +835,9 @@ def _scene_hold_actions_schema(
         fields[
             vol.Optional(
                 f"{name}_double_tap",
-                default=list(button_double_tap.get(name, [])),
+                default=list(
+                    current.get(f"{name}_double_tap") or button_double_tap.get(name, [])
+                ),
             )
         ] = selector.ActionSelector()
         test_labels[f"{name}_double_tap"] = f"{label} double-tap actions"
@@ -941,11 +949,21 @@ def _eligible_pico_devices(
         if device.id in configured_device_ids:
             continue
 
+        # lutron_caseta formats the model as "<model> (<type>)", e.g.
+        # "PJ2-3BRL-GWH-L01 (Pico3ButtonRaiseLower)". Match the type
+        # token exactly, since one type name can be a prefix of another
+        # ("Pico2Button" vs "Pico2ButtonRaiseLower") and the controller
+        # exact-matches the event type against PICO_TYPE_MAP too.
         model = device.model or ""
-        pico_type = next(
-            (code for raw, code in PICO_TYPE_MAP.items() if raw in model),
-            None,
-        )
+        type_match = re.search(r"\(([^()]*)\)\s*$", model)
+
+        if type_match is not None:
+            pico_type = PICO_TYPE_MAP.get(type_match.group(1).strip())
+        else:
+            pico_type = next(
+                (code for raw, code in PICO_TYPE_MAP.items() if raw in model),
+                None,
+            )
 
         if pico_type is None:
             # Not a Pico (e.g. the Smart Bridge or a Fan Speed Controller).
@@ -995,7 +1013,9 @@ class PicoLinkConfigFlow(
             device_ids = user_input["device_ids"]
             types = {devices[device_id][1] for device_id in device_ids}
 
-            if len(types) > 1:
+            if not device_ids:
+                errors["base"] = "at_least_one_device_required"
+            elif len(types) > 1:
                 errors["base"] = "mixed_pico_types"
             else:
                 unique_id = "+".join(sorted(device_ids))
@@ -1359,11 +1379,13 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                     if other_field != field:
                         self._options.pop(other_field, None)
 
-                # Accent lights are only meaningful alongside the light domain.
+                # Accent lights and light presets are only meaningful
+                # alongside the light domain.
                 if field != "lights":
                     for accent_field in (
                         "accent_lights",
                         "accent_light_presets",
+                        "light_presets",
                     ):
                         self._options.pop(accent_field, None)
 
@@ -1454,6 +1476,9 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
                 if self._type == "3BRL":
                     return await self.async_step_light_presets()
+
+                if self._quick_edit_section == "accent_light":
+                    return self._async_finish()
 
                 if self._type in ("P2B", "2B"):
                     return await self.async_step_custom_actions()
@@ -1684,6 +1709,10 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
             self._options["light_presets"] = self._light_presets
 
+            # Light-preset cycling takes over STOP (mirrors
+            # async_step_accent_light for dual-light mode).
+            self._options["middle_button"] = []
+
             if self._quick_edit_section == "accent_light":
                 return self._async_finish()
 
@@ -1706,7 +1735,13 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 add_another_default=self._light_preset_read_index + 1 < len(existing),
                 offer_remove=self._light_preset_read_index < len(existing),
                 offer_enable_toggle=index == 0,
-                enable_default=bool(existing),
+                enable_default=(
+                    self._light_preset_prefill.get(
+                        "cycle_light_presets", bool(existing)
+                    )
+                    if self._light_preset_prefill is not None
+                    else bool(existing)
+                ),
             ),
             description_placeholders={"preset_number": str(preset_number)},
             # A full-chain edit always continues to custom_actions next,
@@ -1966,6 +2001,10 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         # Update data/title and options together so this is one reload,
         # not two — async_create_entry below would otherwise reapply
         # the same options a second time via its own update_entry call.
+        # The unique_id is derived from the device set (see
+        # PicoLinkConfigFlow.async_step_user), so it must follow any
+        # change made on the devices step — otherwise a Pico dropped
+        # here could never be added again ("already_configured").
         self.hass.config_entries.async_update_entry(
             self._entry,
             data={
@@ -1974,6 +2013,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             },
             options=self._options,
             title=self._title,
+            unique_id="+".join(sorted(self._device_ids)),
         )
 
         return self.async_create_entry(
