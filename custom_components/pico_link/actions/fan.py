@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Optional
 
+from homeassistant.components.fan import FanEntityFeature
 from homeassistant.core import State
 
 if TYPE_CHECKING:
@@ -25,9 +26,6 @@ class FanActions:
     """
 
     TARGET_CACHE_SECONDS = 2.0
-
-    # FanEntityFeature.SET_SPEED
-    SET_SPEED_FEATURE = 1
 
     def __init__(self, ctrl: "PicoController") -> None:
         self.ctrl = ctrl
@@ -273,7 +271,7 @@ class FanActions:
         if isinstance(features, bool) or not isinstance(features, int):
             return True
 
-        return bool(features & self.SET_SPEED_FEATURE)
+        return bool(features & FanEntityFeature.SET_SPEED)
 
     def _get_speed_ladder(self, state: State) -> list[int]:
         """
@@ -308,6 +306,14 @@ class FanActions:
         raw_percentage = state.attributes.get("percentage")
 
         if raw_percentage is None:
+            # Home Assistant only publishes `percentage` for fans with
+            # SET_SPEED, so a plain on/off fan that is on has no
+            # percentage at all. Its ladder is [0, 100], so "on" is the
+            # top rung -- otherwise it would read as 0 and LOWER could
+            # never turn it off.
+            if state.state == "on" and not self._supports_set_speed(state):
+                return 100
+
             return 0
 
         if isinstance(raw_percentage, bool) or not isinstance(

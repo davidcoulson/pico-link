@@ -37,3 +37,25 @@ def test_ladder_top_is_reachable_downward():
 
     assert ladder[-1] == 100
     assert ladder[-2] == 66
+
+
+@pytest.mark.parametrize(
+    ("state", "attributes", "expected"),
+    [
+        # Plain on/off fan: HA publishes no `percentage`, so "on" is the top rung.
+        ("on", {"supported_features": 0}, 100),
+        ("off", {"supported_features": 0}, 0),
+        # Speed-capable fan that is on but hasn't reported a speed yet.
+        ("on", {"supported_features": 1}, 0),
+        ("on", {"supported_features": 1, "percentage": 66}, 66),
+        ("off", {"supported_features": 1, "percentage": 66}, 0),
+    ],
+)
+def test_current_percentage_for_on_off_fans(state, attributes, expected):
+    from homeassistant.core import State
+
+    from custom_components.pico_link.actions.fan import FanActions
+
+    actions = FanActions(ctrl=None)
+
+    assert actions._get_current_percentage(State("fan.test", state, attributes)) == expected
