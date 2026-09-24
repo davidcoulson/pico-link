@@ -1,6 +1,7 @@
 # __init__.py — Integration entry point
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 
 from homeassistant.config_entries import ConfigEntry
@@ -19,6 +20,39 @@ from .controller import PicoController
 from .memory import EntryMemory, PicoLinkStore
 
 type PicoLinkConfigEntry = ConfigEntry[list[PicoController]]
+
+
+async def _async_get_store(hass: HomeAssistant) -> PicoLinkStore:
+    """
+    Return the store shared by every Pico Link entry, loading it once.
+
+    Entries set up concurrently would each see no store yet, load their
+    own copy of the same file and then overwrite each other's writes, so
+    the first caller parks the load as a task in hass.data and every
+    other caller awaits that same task.
+    """
+    load_task: asyncio.Task[PicoLinkStore] | None = hass.data.get(DOMAIN)
+
+    if load_task is None:
+        load_task = hass.async_create_task(_async_load_store(hass))
+        hass.data[DOMAIN] = load_task
+
+    try:
+        return await load_task
+    except Exception:
+        # Leave nothing behind so the next setup attempt retries the
+        # load instead of re-raising this failure forever.
+        if hass.data.get(DOMAIN) is load_task:
+            hass.data.pop(DOMAIN)
+
+        raise
+
+
+async def _async_load_store(hass: HomeAssistant) -> PicoLinkStore:
+    store = PicoLinkStore(hass)
+    await store.async_load()
+
+    return store
 
 
 def _entry_device_ids(entry: PicoLinkConfigEntry) -> list[str]:
@@ -67,48 +101,48 @@ async def async_setup_entry(
     """Set up every identically-configured Pico in a config entry."""
     controllers: list[PicoController] = []
 
-    store: PicoLinkStore | None = hass.data.get(DOMAIN)
-
-    if store is None:
-        store = PicoLinkStore(hass)
-        await store.async_load()
-        hass.data[DOMAIN] = store
-
+    store = await _async_get_store(hass)
     memory = EntryMemory(store, entry.entry_id)
 
-    for device_id in _entry_device_ids(entry):
-        device_raw = {
-            "device_id": device_id,
-            "type": entry.data["type"],
-            **entry.options,
-        }
+    try:
+        for device_id in _entry_device_ids(entry):
+            device_raw = {
+                "device_id": device_id,
+                "type": entry.data["type"],
+                **entry.options,
+            }
 
-        try:
-            pico_config = await parse_pico_config(
+            try:
+                pico_config = await parse_pico_config(
+                    hass,
+                    device_raw,
+                )
+            except ValueError as err:
+                # ConfigEntryError surfaces str(err) directly on the entry
+                # (visible in the UI and via ha_get_integration's "reason"),
+                # instead of only a bare "Setup failed" that requires
+                # checking the log. Home Assistant logs the full exception
+                # itself when it catches this.
+                raise ConfigEntryError(
+                    f"Invalid configuration for device {device_id}: {err}"
+                ) from err
+
+            controller = PicoController(
                 hass,
-                device_raw,
+                pico_config,
+                memory,
             )
-        except ValueError as err:
-            for started in controllers:
-                await started.async_stop()
 
-            # ConfigEntryError surfaces str(err) directly on the entry
-            # (visible in the UI and via ha_get_integration's "reason"),
-            # instead of only a bare "Setup failed" that requires
-            # checking the log. Home Assistant logs the full exception
-            # itself when it catches this.
-            raise ConfigEntryError(
-                f"Invalid configuration for device {device_id}: {err}"
-            ) from err
+            await controller.async_start()
+            controllers.append(controller)
+    except Exception:
+        # Whatever failed for a later device (config, construction or
+        # start), the controllers already started would otherwise keep
+        # their bus subscriptions alive with no entry to unload them.
+        for started in controllers:
+            await started.async_stop()
 
-        controller = PicoController(
-            hass,
-            pico_config,
-            memory,
-        )
-
-        await controller.async_start()
-        controllers.append(controller)
+        raise
 
     entry.runtime_data = controllers
 
@@ -234,14 +268,20 @@ def _watch_for_missing_entities(
         else:
             ir.async_delete_issue(hass, DOMAIN, issue_id)
 
+    unsub_started: Callable[[], None] | None = None
+
     @callback
     def _handle_started(_event: Event) -> None:
+        # Fired: the handle is spent, and Home Assistant logs an error
+        # for a once-listener removed a second time.
+        nonlocal unsub_started
+        unsub_started = None
         _check()
 
     if hass.is_running:
         _check()
     else:
-        hass.bus.async_listen_once(
+        unsub_started = hass.bus.async_listen_once(
             EVENT_HOMEASSISTANT_STARTED,
             _handle_started,
         )
@@ -254,10 +294,22 @@ def _watch_for_missing_entities(
         ):
             _check()
 
-    return hass.bus.async_listen(
+    unsub_registry = hass.bus.async_listen(
         EVENT_ENTITY_REGISTRY_UPDATED,
         _handle_entity_registry_updated,
     )
+
+    @callback
+    def _unsubscribe() -> None:
+        # Drop the pending startup check too, so an entry unloaded before
+        # Home Assistant finished starting doesn't run it later against
+        # this stale tracked set.
+        if unsub_started is not None:
+            unsub_started()
+
+        unsub_registry()
+
+    return _unsubscribe
 
 
 async def async_unload_entry(
@@ -281,11 +333,7 @@ async def async_remove_entry(
     entry: PicoLinkConfigEntry,
 ) -> None:
     """Forget a deleted entry's remembered state."""
-    store: PicoLinkStore | None = hass.data.get(DOMAIN)
-
-    if store is None:
-        store = PicoLinkStore(hass)
-        await store.async_load()
+    store = await _async_get_store(hass)
 
     store.remove_entry(entry.entry_id)
 

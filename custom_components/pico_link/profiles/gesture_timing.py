@@ -137,12 +137,22 @@ class HoldDoubleTapGestures:
             if self._hold_generation != generation or self._hold_button != button:
                 return
 
+            # The hold has fired: detach from the hold slot before running
+            # the actions so the release that follows (via _cancel_hold)
+            # no longer cancels this task mid-sequence -- otherwise a hold
+            # action with a delay: or any slow step would be silently
+            # aborted the moment the finger lifts. The task stays tracked
+            # by the controller, so unload can still cancel it.
+            self._hold_button = None
+            self._hold_task = None
+
             await self._ctrl.utils.execute_button_action(
                 hold_actions,
                 name=f"pico_link_{button}_hold",
             )
         except asyncio.CancelledError:
-            # Expected when released before the hold threshold.
+            # Expected when released before the hold threshold (or on
+            # unload while the actions are still running).
             pass
 
     # -------------------------------------------------------------

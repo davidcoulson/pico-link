@@ -40,11 +40,19 @@ class PicoLinkStore:
 
         # Delayed saves are flushed on HA shutdown, so rapid RAISE/LOWER
         # taps coalesce into one write without losing the last one.
-        self._store.async_delay_save(lambda: self._data, SAVE_DELAY_SECONDS)
+        self._store.async_delay_save(self._data_to_save, SAVE_DELAY_SECONDS)
 
     def remove_entry(self, entry_id: str) -> None:
         if self._data.pop(entry_id, None) is not None:
-            self._store.async_delay_save(lambda: self._data, SAVE_DELAY_SECONDS)
+            self._store.async_delay_save(self._data_to_save, SAVE_DELAY_SECONDS)
+
+    def _data_to_save(self) -> dict[str, dict[str, Any]]:
+        # Store serialises in an executor thread, so hand it a snapshot
+        # rather than the live dicts: a set() landing on the event loop
+        # mid-serialisation would otherwise raise "dictionary changed
+        # size during iteration" and lose the save. Values are scalars,
+        # so a copy one level down is enough.
+        return {entry_id: dict(entry) for entry_id, entry in self._data.items()}
 
 
 class EntryMemory:

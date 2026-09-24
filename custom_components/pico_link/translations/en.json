@@ -52,6 +52,7 @@
     "error": {
       "single_domain_required": "Fill in exactly one of the fields above — the one domain this Pico controls — and leave the rest empty.",
       "buttons_required": "Configure at least one button with actions.",
+      "at_least_one_device_required": "Select at least one Pico to keep in this entry.",
       "mixed_pico_types": "Select devices of only one Pico type — the devices you picked aren't all the same type."
     },
     "abort": {
