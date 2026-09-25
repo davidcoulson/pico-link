@@ -5,6 +5,10 @@
 # but built on our own pico_link_button event instead of Lutron's raw
 # LEAP/keypad data, since Pico Link already knows each configured
 # device's type and the buttons that go with it.
+#
+# The device the automation editor hands us is Pico Link's own mirror
+# device for the Pico (see _sync_pico_devices in __init__.py), so it is
+# mapped back to the Lutron device ID that pico_link_button carries.
 from __future__ import annotations
 
 from typing import Any
@@ -14,10 +18,11 @@ from homeassistant.components.device_automation import DEVICE_TRIGGER_BASE_SCHEM
 from homeassistant.components.homeassistant.triggers import event as event_trigger
 from homeassistant.const import CONF_DEVICE_ID, CONF_DOMAIN, CONF_PLATFORM, CONF_TYPE
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.trigger import TriggerActionType, TriggerInfo
 from homeassistant.helpers.typing import ConfigType
 
-from . import _entry_device_ids
+from . import _entry_device_ids, pico_link_source_device_id
 from .const import DOMAIN, PICO_BUTTON_EVENT, PICO_TYPE_BUTTONS
 
 CONF_SUBTYPE = "subtype"
@@ -32,10 +37,26 @@ TRIGGER_SCHEMA = DEVICE_TRIGGER_BASE_SCHEMA.extend(
 )
 
 
-def _entry_for_device(hass: HomeAssistant, device_id: str):
-    """Return the Pico Link config entry that includes this device, if any."""
+def _lutron_device_id(hass: HomeAssistant, device_id: str) -> str:
+    """
+    Return the Lutron device ID behind a device the automation editor picked.
+
+    That's normally one of Pico Link's mirror devices, whose identifier
+    carries the Lutron ID. Any other device ID (an automation written
+    against the Lutron device itself) is passed through unchanged.
+    """
+    device = dr.async_get(hass).async_get(device_id)
+
+    if device is None:
+        return device_id
+
+    return pico_link_source_device_id(device) or device_id
+
+
+def _entry_for_device(hass: HomeAssistant, lutron_device_id: str):
+    """Return the Pico Link config entry that includes this Lutron device, if any."""
     for entry in hass.config_entries.async_entries(DOMAIN):
-        if device_id in _entry_device_ids(entry):
+        if lutron_device_id in _entry_device_ids(entry):
             return entry
 
     return None
@@ -46,7 +67,7 @@ async def async_get_triggers(
     device_id: str,
 ) -> list[dict[str, Any]]:
     """List device triggers for a configured Pico."""
-    entry = _entry_for_device(hass, device_id)
+    entry = _entry_for_device(hass, _lutron_device_id(hass, device_id))
 
     if entry is None:
         return []
@@ -80,7 +101,7 @@ async def async_attach_trigger(
                 event_trigger.CONF_PLATFORM: "event",
                 event_trigger.CONF_EVENT_TYPE: PICO_BUTTON_EVENT,
                 event_trigger.CONF_EVENT_DATA: {
-                    CONF_DEVICE_ID: config[CONF_DEVICE_ID],
+                    CONF_DEVICE_ID: _lutron_device_id(hass, config[CONF_DEVICE_ID]),
                     "action": config[CONF_TYPE],
                     "button": config[CONF_SUBTYPE],
                 },
