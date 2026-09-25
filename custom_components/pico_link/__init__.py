@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+import dataclasses
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT_STOP
@@ -13,10 +15,11 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import EVENT_DEVICE_REGISTRY_UPDATED
 from homeassistant.helpers.entity_registry import EVENT_ENTITY_REGISTRY_UPDATED
+from homeassistant.helpers.event import async_track_state_change_event
 
 from .config import parse_pico_config
 from .const import DOMAIN
-from .controller import PicoController
+from .controller import PicoController, type_mismatch_issue_id
 from .memory import EntryMemory, PicoLinkStore
 
 type PicoLinkConfigEntry = ConfigEntry[list[PicoController]]
@@ -103,33 +106,35 @@ async def async_setup_entry(
 
     store = await _async_get_store(hass)
     memory = EntryMemory(store, entry.entry_id)
+    device_ids = _entry_device_ids(entry)
 
+    # Every Pico in an entry shares the same options, so validate them
+    # once (action validation walks the whole action tree) and stamp
+    # each device ID onto a copy instead of re-parsing per Pico.
     try:
-        for device_id in _entry_device_ids(entry):
-            device_raw = {
-                "device_id": device_id,
+        shared_config = await parse_pico_config(
+            hass,
+            {
+                "device_id": device_ids[0],
                 "type": entry.data["type"],
                 **entry.options,
-            }
+            },
+        )
+    except ValueError as err:
+        # ConfigEntryError surfaces str(err) directly on the entry
+        # (visible in the UI and via ha_get_integration's "reason"),
+        # instead of only a bare "Setup failed" that requires checking
+        # the log. Home Assistant logs the full exception itself when
+        # it catches this.
+        raise ConfigEntryError(f"Invalid configuration: {err}") from err
 
-            try:
-                pico_config = await parse_pico_config(
-                    hass,
-                    device_raw,
-                )
-            except ValueError as err:
-                # ConfigEntryError surfaces str(err) directly on the entry
-                # (visible in the UI and via ha_get_integration's "reason"),
-                # instead of only a bare "Setup failed" that requires
-                # checking the log. Home Assistant logs the full exception
-                # itself when it catches this.
-                raise ConfigEntryError(
-                    f"Invalid configuration for device {device_id}: {err}"
-                ) from err
+    _sync_device_links(hass, entry, device_ids)
 
+    try:
+        for device_id in device_ids:
             controller = PicoController(
                 hass,
-                pico_config,
+                dataclasses.replace(shared_config, device_id=device_id),
                 memory,
             )
 
@@ -166,6 +171,46 @@ async def async_setup_entry(
     entry.async_on_unload(_watch_for_missing_entities(hass, entry))
 
     return True
+
+
+def _sync_device_links(
+    hass: HomeAssistant,
+    entry: PicoLinkConfigEntry,
+    device_ids: list[str],
+) -> None:
+    """
+    Link this entry to its Pico devices in the device registry.
+
+    Home Assistant only offers an integration's device triggers for
+    devices that carry one of its config entries (or its entities).
+    The Picos themselves belong to lutron_caseta, so without this link
+    device_trigger.py is never consulted and the "Device -> <Pico> ->
+    button pressed" options never appear in the automation editor. A
+    Pico dropped from the entry on the devices step is unlinked here
+    too; deleting the entry unlinks everything via Home Assistant's own
+    config-entry cleanup.
+    """
+    device_registry = dr.async_get(hass)
+    wanted = set(device_ids)
+
+    for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+        if device.id not in wanted:
+            device_registry.async_update_device(
+                device.id,
+                remove_config_entry_id=entry.entry_id,
+            )
+
+    for device_id in device_ids:
+        device = device_registry.async_get(device_id)
+
+        # A Pico removed from Lutron is reported by _watch_for_removed_devices.
+        if device is None or entry.entry_id in device.config_entries:
+            continue
+
+        device_registry.async_update_device(
+            device_id,
+            add_config_entry_id=entry.entry_id,
+        )
 
 
 def _pico_removed_issue_id(device_id: str) -> str:
@@ -210,13 +255,19 @@ def _watch_for_removed_devices(
     _check()
 
     @callback
-    def _handle_device_registry_updated(event: Event) -> None:
-        if event.data.get("device_id") in device_ids:
-            _check()
+    def _handle_device_registry_updated(_event: Event) -> None:
+        _check()
+
+    # Filtered inline in the bus so other devices' registry events don't
+    # schedule a callback per entry.
+    @callback
+    def _is_tracked_device(event_data: Mapping[str, Any]) -> bool:
+        return event_data.get("device_id") in device_ids
 
     return hass.bus.async_listen(
         EVENT_DEVICE_REGISTRY_UPDATED,
         _handle_device_registry_updated,
+        event_filter=_is_tracked_device,
     )
 
 
@@ -237,7 +288,12 @@ def _watch_for_missing_entities(
     waits for Home Assistant to finish starting so slower-loading
     integrations aren't flagged as "missing" before they've registered
     their entities; it runs immediately for an entry set up (or reloaded)
-    after that, and again whenever the entity registry changes.
+    after that, and again whenever the entity registry changes or a
+    tracked entity appears in or disappears from the state machine.
+
+    An entity counts as present if either the entity registry or the
+    state machine knows it: entities without a unique_id (YAML template
+    lights, some groups) never get a registry entry but work fine.
     """
     tracked = set(_entry_entity_ids(entry))
     issue_id = _pico_entity_missing_issue_id(entry.entry_id)
@@ -247,10 +303,14 @@ def _watch_for_missing_entities(
 
     entity_registry = er.async_get(hass)
 
-    def _check() -> None:
-        missing = sorted(
-            entity_id for entity_id in tracked if entity_registry.async_get(entity_id) is None
+    def _is_present(entity_id: str) -> bool:
+        return (
+            entity_registry.async_get(entity_id) is not None
+            or hass.states.get(entity_id) is not None
         )
+
+    def _check() -> None:
+        missing = sorted(entity_id for entity_id in tracked if not _is_present(entity_id))
 
         if missing:
             ir.async_create_issue(
@@ -287,16 +347,35 @@ def _watch_for_missing_entities(
         )
 
     @callback
-    def _handle_entity_registry_updated(event: Event) -> None:
-        if (
-            event.data.get("entity_id") in tracked
-            or event.data.get("old_entity_id") in tracked
-        ):
-            _check()
+    def _handle_entity_registry_updated(_event: Event) -> None:
+        _check()
+
+    # Filtered inline in the bus so other entities' registry events
+    # don't schedule a callback per entry.
+    @callback
+    def _is_tracked_entity(event_data: Mapping[str, Any]) -> bool:
+        return (
+            event_data.get("entity_id") in tracked
+            or event_data.get("old_entity_id") in tracked
+        )
 
     unsub_registry = hass.bus.async_listen(
         EVENT_ENTITY_REGISTRY_UPDATED,
         _handle_entity_registry_updated,
+        event_filter=_is_tracked_entity,
+    )
+
+    @callback
+    def _handle_state_changed(event: Event) -> None:
+        # Only an entity appearing or disappearing matters here, not
+        # its ordinary on/off/brightness changes.
+        if event.data.get("old_state") is None or event.data.get("new_state") is None:
+            _check()
+
+    unsub_states = async_track_state_change_event(
+        hass,
+        tracked,
+        _handle_state_changed,
     )
 
     @callback
@@ -308,6 +387,7 @@ def _watch_for_missing_entities(
             unsub_started()
 
         unsub_registry()
+        unsub_states()
 
     return _unsubscribe
 
@@ -322,6 +402,7 @@ async def async_unload_entry(
 
     for device_id in _entry_device_ids(entry):
         ir.async_delete_issue(hass, DOMAIN, _pico_removed_issue_id(device_id))
+        ir.async_delete_issue(hass, DOMAIN, type_mismatch_issue_id(device_id))
 
     ir.async_delete_issue(hass, DOMAIN, _pico_entity_missing_issue_id(entry.entry_id))
 

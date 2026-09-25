@@ -1059,10 +1059,16 @@ class LightActions:
     # =============================================================
 
     def reset_state(self) -> None:
-        """Cancel the active gesture and clear optimistic state."""
+        """
+        Cancel the active gesture and clear this Pico's optimistic state.
+
+        The accent preset index and selection live in the entry-shared
+        runtime dict, which is created fresh on every setup, so they
+        are deliberately left alone here: one Pico stopping must not
+        reset where its siblings are in the cycle.
+        """
         self._clear_gesture()
         self._clear_brightness_target()
-        self._accent_preset_index = None
         self._light_preset_index = None
         self._target_effect = None
         self._effect_updated_at = 0.0

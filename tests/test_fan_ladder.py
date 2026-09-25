@@ -58,4 +58,7 @@ def test_current_percentage_for_on_off_fans(state, attributes, expected):
 
     actions = FanActions(ctrl=None)
 
-    assert actions._get_current_percentage(State("fan.test", state, attributes)) == expected
+    assert (
+        actions._get_current_percentage(State("fan.test", state, attributes))
+        == expected
+    )

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import inspect
 import logging
 from typing import TYPE_CHECKING, Any, Optional, cast
 
 from homeassistant.core import Context, HomeAssistant
-from homeassistant.helpers.script import Script
+from homeassistant.helpers.script import DATA_SCRIPTS, Script
 
 from .const import DOMAIN, DOMAIN_ENTITY_FIELDS
 
@@ -13,6 +12,23 @@ if TYPE_CHECKING:
     from .controller import PicoController
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def async_release_script(hass: HomeAssistant, script: Script) -> None:
+    """
+    Stop a Script and drop it from Home Assistant's script registry.
+
+    Every top-level Script appends itself to hass.data["helpers.script"]
+    on construction (so shutdown can stop running scripts) and nothing
+    in Home Assistant ever removes it, so a Script that is done for good
+    has to be taken out here or it lives for the rest of the process.
+    """
+    await script.async_stop()
+
+    registered = hass.data.get(DATA_SCRIPTS)
+
+    if registered:
+        registered[:] = [item for item in registered if item["instance"] is not script]
 
 
 class SharedUtils:
@@ -31,6 +47,17 @@ class SharedUtils:
         # tap-versus-hold and ramp behavior.
         self._hold_time = self.conf.hold_time_ms / 1000.0
         self._step_time = self.conf.step_time_ms / 1000.0
+
+        # The configuration is immutable, so resolve the one configured
+        # domain once instead of scanning the entity fields per event.
+        self._domain: Optional[str] = next(
+            (
+                domain
+                for domain in DOMAIN_ENTITY_FIELDS
+                if self.entities_for_domain(domain)
+            ),
+            None,
+        )
 
         # One Script per configured action list, built lazily on first
         # use and kept for the controller's lifetime. Every top-level
@@ -60,11 +87,7 @@ class SharedUtils:
 
     def entity_domain(self) -> Optional[str]:
         """Return the single configured entity domain."""
-        for domain in DOMAIN_ENTITY_FIELDS:
-            if self.entities_for_domain(domain):
-                return domain
-
-        return None
+        return self._domain
 
     def primary_entity(
         self,
@@ -242,15 +265,4 @@ class SharedUtils:
         self._scripts.clear()
 
         for script in scripts:
-            await script.async_stop()
-
-            # Script only deregisters itself from hass.data on
-            # _async_unload(), which not every Home Assistant release
-            # provides.
-            unload = getattr(script, "_async_unload", None)
-
-            if callable(unload):
-                result = unload()
-
-                if inspect.isawaitable(result):
-                    await result
+            await async_release_script(self.hass, script)

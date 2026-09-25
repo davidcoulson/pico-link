@@ -21,6 +21,7 @@ from .const import (
     PICO_TYPE_MAP,
     SCENE_BUTTONS,
 )
+from .utilities import async_release_script
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,6 +48,9 @@ async def _run_test_action(
     except Exception:
         _LOGGER.exception("Error running test action %r", name)
         return False
+    finally:
+        # A one-off preview; don't leave it in HA's script registry.
+        await async_release_script(hass, script)
 
     return True
 
