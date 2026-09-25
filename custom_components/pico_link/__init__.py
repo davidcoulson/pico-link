@@ -128,7 +128,7 @@ async def async_setup_entry(
         # it catches this.
         raise ConfigEntryError(f"Invalid configuration: {err}") from err
 
-    _sync_device_links(hass, entry, device_ids)
+    _sync_pico_devices(hass, entry, device_ids)
 
     try:
         for device_id in device_ids:
@@ -173,44 +173,65 @@ async def async_setup_entry(
     return True
 
 
-def _sync_device_links(
+def _sync_pico_devices(
     hass: HomeAssistant,
     entry: PicoLinkConfigEntry,
     device_ids: list[str],
 ) -> None:
     """
-    Link this entry to its Pico devices in the device registry.
+    Give this entry its own device-registry device for each of its Picos.
 
     Home Assistant only offers an integration's device triggers for
-    devices that carry one of its config entries (or its entities).
-    The Picos themselves belong to lutron_caseta, so without this link
-    device_trigger.py is never consulted and the "Device -> <Pico> ->
-    button pressed" options never appear in the automation editor. A
-    Pico dropped from the entry on the devices step is unlinked here
-    too; deleting the entry unlinks everything via Home Assistant's own
+    devices that integration owns (or has entities on). The Picos
+    themselves belong to lutron_caseta, and since Home Assistant 2026.8
+    a device belongs to exactly one config entry, so Pico Link can't
+    attach itself to Lutron's device. Instead each Pico gets a Pico Link
+    device that mirrors Lutron's name, model and area and carries the
+    Lutron device ID as its identifier; device_trigger.py maps it back.
+
+    A Pico dropped from the entry on the devices step loses its device
+    here; deleting the entry removes them all via Home Assistant's own
     config-entry cleanup.
     """
     device_registry = dr.async_get(hass)
     wanted = set(device_ids)
+    mirrors: dict[str, dr.DeviceEntry] = {}
 
     for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
-        if device.id not in wanted:
-            device_registry.async_update_device(
-                device.id,
-                remove_config_entry_id=entry.entry_id,
-            )
+        source_id = pico_link_source_device_id(device)
 
-    for device_id in device_ids:
-        device = device_registry.async_get(device_id)
+        if source_id in wanted:
+            mirrors[source_id] = device
+        else:
+            device_registry.async_remove_device(device.id)
+
+    for source_id in device_ids:
+        source = device_registry.async_get(source_id)
 
         # A Pico removed from Lutron is reported by _watch_for_removed_devices.
-        if device is None or entry.entry_id in device.config_entries:
+        if source is None:
             continue
 
-        device_registry.async_update_device(
-            device_id,
-            add_config_entry_id=entry.entry_id,
+        mirror = device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, source_id)},
+            name=source.name_by_user or source.name,
+            manufacturer=source.manufacturer,
+            model=source.model,
         )
+
+        # Put a freshly created mirror in the Pico's room so it sits next
+        # to Lutron's device in pickers; after that the area is the user's.
+        if source_id not in mirrors and source.area_id and mirror.area_id is None:
+            device_registry.async_update_device(mirror.id, area_id=source.area_id)
+
+
+def pico_link_source_device_id(device: dr.DeviceEntry) -> str | None:
+    """Return the Lutron device ID a Pico Link device mirrors, if it is one."""
+    return next(
+        (value for domain, value in device.identifiers if domain == DOMAIN),
+        None,
+    )
 
 
 def _pico_removed_issue_id(device_id: str) -> str:
@@ -310,7 +331,9 @@ def _watch_for_missing_entities(
         )
 
     def _check() -> None:
-        missing = sorted(entity_id for entity_id in tracked if not _is_present(entity_id))
+        missing = sorted(
+            entity_id for entity_id in tracked if not _is_present(entity_id)
+        )
 
         if missing:
             ir.async_create_issue(

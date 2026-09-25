@@ -894,6 +894,13 @@ shortcut over `pico_link_button`, not a separate mechanism, and only
 offers the buttons that Pico's type actually has (e.g. a P2B only offers
 ON/OFF; a 4B offers its four scene buttons).
 
+Each configured Pico shows up twice in the device picker: once as the
+Lutron Caséta device (with Lutron's own triggers) and once as a Pico
+Link device with the same name (with these triggers). Home Assistant
+gives every integration its own device, so Pico Link creates a mirror
+of each Pico it controls, placed in the same area. Only the Pico Link
+one lists the `pico_link_button` triggers.
+
 ---
 
 ## Troubleshooting
