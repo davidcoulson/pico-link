@@ -316,6 +316,7 @@ step of setup (or editing), pre-filled with these defaults:
 | `light_on_pct`           | Light                |          `100` | `1–100` percent                       |
 | `light_low_pct`          | Light                |            `5` | `1–99` percent                        |
 | `light_step_pct`         | Light                |           `10` | `1–25` percent                        |
+| `light_transition_step_ms` | Light            |            `0` | `0–2000` ms                          |
 | `light_transition_on`    | Light                |            `0` | `0–300` seconds                       |
 | `light_transition_off`   | Light                |            `0` | `0–300` seconds                       |
 | `light_on_off_toggle`    | Light                |        `false` | Boolean                               |
@@ -482,8 +483,13 @@ once.
 ### Light transitions
 
 `light_transition_on` and `light_transition_off` apply only to ON and OFF tap
-actions. When a transition is `0`, the transition field is omitted from the
-action call. Brightness steps and ramps do not use transitions.
+actions. `light_transition_step_ms` applies to brightness changes from both
+single RAISE/LOWER taps and continuous holds (including P2B/2B ON/OFF holds).
+It is capped at `step_time_ms` so a held ramp does not request a transition
+longer than the interval between steps; this cap also applies to single taps.
+A transition of `0` omits the field from the service call, preserving the
+light's existing behavior. Rapid repeated taps and device/network delays
+can still make transitions overlap.
 
 ### Light toggle mode
 
