@@ -67,6 +67,7 @@ class PicoConfig:
     light_on_pct: int = 100
     light_low_pct: int = 5
     light_step_pct: int = 10
+    light_transition_step_ms: int = 0
     light_transition_on: int = 0
     light_transition_off: int = 0
     light_on_off_toggle: bool = False
@@ -923,6 +924,13 @@ async def parse_pico_config(
         max_val=25,
     )
 
+    light_transition_step_ms = _normalize_int(
+        merged.get("light_transition_step_ms", 0),
+        default=0,
+        min_val=0,
+        max_val=2000,
+    )
+
     light_transition_on = _normalize_int(
         merged.get(
             "light_transition_on",
@@ -1085,6 +1093,7 @@ async def parse_pico_config(
         light_on_pct=light_on_pct,
         light_low_pct=light_low_pct,
         light_step_pct=light_step_pct,
+        light_transition_step_ms=light_transition_step_ms,
         light_transition_on=light_transition_on,
         light_transition_off=light_transition_off,
         light_on_off_toggle=light_on_off_toggle,

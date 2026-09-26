@@ -1048,9 +1048,17 @@ class LightActions:
         self,
         percentage: int,
     ) -> None:
+        transition_ms = min(
+            self.ctrl.conf.light_transition_step_ms,
+            self.ctrl.conf.step_time_ms,
+        )
+        data: dict[str, Any] = {"brightness_pct": percentage}
+        if transition_ms > 0:
+            data["transition"] = transition_ms / 1000
+
         await self.ctrl.utils.call_service(
             "turn_on",
-            {"brightness_pct": percentage},
+            data,
             domain="light",
         )
 

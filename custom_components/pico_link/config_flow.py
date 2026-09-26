@@ -79,10 +79,10 @@ def _percent(
     )
 
 
-def _milliseconds() -> selector.NumberSelector:
+def _milliseconds(min_val: int = 100) -> selector.NumberSelector:
     return selector.NumberSelector(
         selector.NumberSelectorConfig(
-            min=100,
+            min=min_val,
             max=2000,
             step=50,
             mode=selector.NumberSelectorMode.SLIDER,
@@ -246,6 +246,13 @@ def _options_schema(
                 ),
             )
         ] = _percent(1, 25)
+
+        fields[
+            vol.Optional(
+                "light_transition_step_ms",
+                default=current.get("light_transition_step_ms", 0),
+            )
+        ] = _milliseconds(min_val=0)
 
         fields[
             vol.Optional(

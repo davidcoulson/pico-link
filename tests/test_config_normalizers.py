@@ -162,6 +162,7 @@ async def test_parse_pico_config_without_custom_actions_needs_no_hass():
             "lights": ["light.a"],
             "light_on_pct": "80",
             "hold_time_ms": 0,
+            "light_transition_step_ms": "500",
             "light_on_off_toggle": "yes",
             "accent_light_presets": [{"accent_light_rgb_color": [1, 2, 3]}],
         },
@@ -172,5 +173,16 @@ async def test_parse_pico_config_without_custom_actions_needs_no_hass():
     assert config.light_on_pct == 80
     assert config.hold_time_ms == 400
     assert config.light_on_off_toggle is False
+    assert config.light_transition_step_ms == 500
     assert config.accent_light_presets[0].rgb_color == [1, 2, 3]
     assert config.middle_button == []
+
+
+@pytest.mark.asyncio
+async def test_step_transition_default_and_upper_bound():
+    base = {"device_id": "dev", "type": "3BRL", "lights": ["light.a"]}
+    default = await parse_pico_config(None, base)
+    capped = await parse_pico_config(None, {**base, "light_transition_step_ms": 4000})
+
+    assert default.light_transition_step_ms == 0
+    assert capped.light_transition_step_ms == 2000
