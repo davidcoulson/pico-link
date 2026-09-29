@@ -821,6 +821,17 @@ After installing an updated version:
 
 ---
 
+## Development and Testing
+
+Pico Link includes regression tests for configuration, remote events, device
+controls, tap/hold behavior, custom actions, and shutdown. GitHub runs the suite
+on pushes and pull requests to `beta` and `main`.
+
+See [the testing guide](tests/README.md) for setup, local commands, coverage,
+and the hardware checks that still need to be performed before a release.
+
+---
+
 ## Support Development
 
 <a href="https://buymeacoffee.com/smartqasa" target="_blank">

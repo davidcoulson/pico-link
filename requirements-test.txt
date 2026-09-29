@@ -1,2 +1,4 @@
 # Regression suite baseline: Home Assistant 2026.9.1 (Python 3.14).
 pytest-homeassistant-custom-component==0.13.364
+pytest-cov==7.1.0
+ruff==0.16.6
