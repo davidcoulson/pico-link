@@ -22,6 +22,12 @@ fail() {
 
 echo "Promoting ${SOURCE_BRANCH} → ${TARGET_BRANCH} for ${REPO_EXPECTED}..."
 
+# Use the active Python environment when available, or the standard
+# python3 command on systems that do not provide a python alias.
+python_cmd=$(command -v python || command -v python3) ||
+    fail "Python 3 was not found. Install Python 3 or activate a Python environment."
+readonly python_cmd
+
 # ================================================================
 # REPOSITORY VALIDATION
 # ================================================================
@@ -94,17 +100,17 @@ fi
 # ================================================================
 
 echo "Checking Python syntax..."
-python -m compileall \
+"${python_cmd}" -m compileall \
     -q \
     "${INTEGRATION_PATH}"
 
 echo "Validating JSON files..."
-python -m json.tool \
+"${python_cmd}" -m json.tool \
     "${INTEGRATION_PATH}/manifest.json" \
     >/dev/null
 
 if [[ -f "hacs.json" ]]; then
-    python -m json.tool \
+    "${python_cmd}" -m json.tool \
         "hacs.json" \
         >/dev/null
 fi
