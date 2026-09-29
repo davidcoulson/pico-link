@@ -821,42 +821,6 @@ After installing an updated version:
 
 ---
 
-## Development and Testing
-
-Pico Link includes regression tests for configuration, remote events, device
-controls, tap/hold behavior, custom actions, and shutdown. GitHub runs the suite
-on pushes and pull requests to `beta` and `main`.
-
-See [the testing guide](tests/README.md) for setup, local commands, coverage,
-and the hardware checks that still need to be performed before a release.
-
-### Promoting beta to main
-
-Use the two existing branches: develop directly on `beta`, then promote tested
-changes to `main` through GitHub. Temporary development branches are optional.
-
-1. Commit and push changes to `beta`.
-2. Wait for the **Pico Link regression tests** check to pass and test the
-   affected behavior on your Home Assistant hardware.
-3. [Open the beta-to-main comparison](https://github.com/smartqasa/pico-link/compare/main...beta)
-   and create a pull request, or open the existing promotion pull request.
-4. Review the changes and wait for the pull request's required check to pass.
-   If GitHub asks you to update the branch, use **Update branch** to bring
-   `main` into `beta`, then wait for the checks again.
-5. Choose **Create a merge commit** and confirm the merge. Keep `beta` for the
-   next development cycle; do not delete it.
-
-The `main` ruleset requires a pull request and the GitHub Actions regression
-check against the current base branch. No approving review from another person
-is required. Force pushes and deletion are blocked, with no bypass actors.
-Direct changes to `beta` remain allowed.
-
-The former `promote.sh` script has been retired. GitHub now provides the
-promotion review and merge step. Publishing a versioned GitHub release for
-HACS remains a separate operation.
-
----
-
 ## Support Development
 
 <a href="https://buymeacoffee.com/smartqasa" target="_blank">
