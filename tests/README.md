@@ -45,6 +45,7 @@ python -m pytest -q tests/test_gestures.py
 | `test_device_controls.py` | On/Off behavior for all three domain-controlling Pico models; shade position/direction, fan speeds/direction, volume limits/mute, and switches |
 | `test_gestures.py` | Tap/hold distinctions, release and direction changes, shade stop ordering, natural ramp limits, and concurrent remotes |
 | `test_custom_actions.py` | All four scene buttons, middle-button overrides, ordered completion, target/data preservation, service errors, and interrupted sequences |
+| `test_button_overrides.py` | Tap/hold overrides on every supported button, native fallback, legacy precedence, empty lists, release timing, cover stop ordering, shutdown, and five concurrent remotes |
 
 The new integration tests enter through Home Assistant's setup interface and
 send Pico events through its event bus. Assertions check outgoing service
@@ -112,3 +113,19 @@ Automated checks do not measure Lutron radio reliability, physical light or
 shade response, network latency, or whether dimming feels right. Before release,
 also test the affected behavior on real hardware. Coverage reports identify
 untested paths; a high percentage alone does not prove correct behavior.
+
+## Testing button overrides on hardware
+
+Compare a remote with no overrides against one with a single override. Confirm
+unconfigured buttons retain their response timing. For each configured button,
+test a quick tap, release just before the hold threshold, and a long hold.
+The custom hold must run once and release must not run the tap as well.
+
+Check that a Raise/Lower tap override retains normal dimming on hold, including
+the configured minimum from off. Its first hold step now follows the hold
+threshold, since the tap and hold are exclusive. Check release and direction
+changes, and test multiple remotes concurrently. On covers, confirm an
+interrupted continuous hold stops before the replacement action runs.
+
+The automated concurrency tests use service doubles; they do not establish
+bridge throughput, real-world latency, or physical-device acceptance.

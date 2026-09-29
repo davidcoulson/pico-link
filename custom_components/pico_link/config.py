@@ -22,6 +22,13 @@ _VALID_4B_BUTTONS = frozenset(
 
 ActionConfig = dict[str, Any]
 
+PICO_BUTTONS = {
+    "P2B": frozenset({"on", "off"}),
+    "2B": frozenset({"on", "off"}),
+    "3BRL": frozenset({"on", "off", "raise", "lower", "stop"}),
+    "4B": _VALID_4B_BUTTONS,
+}
+
 
 @dataclass
 class PicoConfig:
@@ -65,6 +72,9 @@ class PicoConfig:
     # 4B only.
     buttons: dict[str, list[ActionConfig]] = field(default_factory=dict)
 
+    # Explicit gesture overrides; absence and an empty list are distinct.
+    overrides: dict[str, list[ActionConfig]] = field(default_factory=dict)
+
     def validate(self) -> None:
         """Validate the normalized Pico configuration."""
         if self.type not in VALID_PICO_TYPES:
@@ -89,13 +99,13 @@ class PicoConfig:
                 raise ValueError(
                     f"Pico {self.device_id} (4B) cannot define "
                     f"entity domains: {', '.join(active_domains)}. "
-                    "Use 'buttons' only."
+                    "Use button actions instead."
                 )
 
-            if not self.buttons:
+            if not self.buttons and not self.overrides:
                 raise ValueError(
                     f"Pico {self.device_id} (4B) must define "
-                    "a non-empty 'buttons' mapping."
+                    "a non-empty 'buttons' mapping or button tap/hold overrides."
                 )
 
             if self.middle_button:
@@ -434,6 +444,7 @@ def _normalize_buttons(
 def _expand_action_placeholders(
     actions: list[ActionConfig],
     placeholders: dict[str, list[str]],
+    context: str = "middle_button",
 ) -> list[ActionConfig]:
     """
     Expand entity placeholders while preserving other target fields.
@@ -476,7 +487,7 @@ def _expand_action_placeholders(
             ):
                 if not isinstance(entity_id, str):
                     raise ValueError(
-                        f"middle_button action {action_index} "
+                        f"{context} action {action_index} "
                         "target entity_id entry "
                         f"{entity_index} must be a string."
                     )
@@ -490,7 +501,7 @@ def _expand_action_placeholders(
 
         else:
             raise ValueError(
-                f"middle_button action {action_index} target "
+                f"{context} action {action_index} target "
                 "entity_id must be a string or list of strings."
             )
 
@@ -729,6 +740,18 @@ def parse_pico_config(
         merged.get("buttons"),
     )
 
+    overrides = {}
+    valid_buttons = PICO_BUTTONS.get(device_type, frozenset())
+    for key, value in merged.items():
+        if not isinstance(key, str) or not key.endswith(("_tap", "_hold")):
+            continue
+        button = key.rsplit("_", 1)[0]
+        if button not in valid_buttons:
+            raise ValueError(f"'{key}' is not a supported button override for {device_type}.")
+        if not isinstance(value, list):
+            raise ValueError(f"'{key}' must be a list of actions; use [] to disable it.")
+        overrides[key] = _normalize_action_list(value, context=key)
+
     # ------------------------------------------------------------
     # BUILD CONFIGURATION
     # ------------------------------------------------------------
@@ -755,6 +778,7 @@ def parse_pico_config(
         media_player_vol_step=media_player_vol_step,
         middle_button=middle_button,
         buttons=buttons,
+        overrides=overrides,
     )
 
     placeholders = {
@@ -769,6 +793,11 @@ def parse_pico_config(
         pico_config.middle_button,
         placeholders,
     )
+
+    pico_config.overrides = {
+        key: _expand_action_placeholders(actions, placeholders, context=key)
+        for key, actions in overrides.items()
+    }
 
     pico_config.validate()
 

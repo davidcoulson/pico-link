@@ -215,6 +215,37 @@ class CoverActions:
     # ON / OFF TAP-HOLD GESTURES
     # =============================================================
 
+    def prepare_override(
+        self, button: str, *, default_tap: bool
+    ) -> tuple[asyncio.Task[Any] | None, bool]:
+        """Stop an older continuous gesture before routing a custom button."""
+        was_holding = self._clear_gesture_state()
+        tap_consumed = (
+            default_tap
+            and button in {"on", "off"}
+            and (was_holding or self._is_moving())
+        )
+        if was_holding or tap_consumed:
+            self._clear_position_target()
+            stop = self.ctrl.create_task(
+                self._stop(blocking=True), "cover-stop-before-override"
+            )
+            return stop, tap_consumed
+        return None, False
+
+    def invalidate_target(self) -> None:
+        self._clear_position_target()
+
+    def start_hold(self, button: str) -> None:
+        """Start continuous motion after a hold has already been recognized."""
+        self._clear_gesture_state()
+        self._active_button = button
+        self._is_holding = True
+        self._hold_task = self.ctrl.create_task(
+            self._hold_lifecycle(button, self._gesture_generation, wait=False),
+            f"cover-{button}-hold",
+        )
+
     def _press_onoff(self, button: str) -> None:
         """Handle an ON or OFF press for every Pico profile."""
         was_holding = self._clear_gesture_state()
@@ -429,10 +460,13 @@ class CoverActions:
         self,
         button: str,
         generation: int,
+        *,
+        wait: bool = True,
     ) -> None:
         """Begin continuous movement after the hold threshold."""
         try:
-            await asyncio.sleep(self.ctrl.utils._hold_time)
+            if wait:
+                await asyncio.sleep(self.ctrl.utils._hold_time)
 
             if generation != self._gesture_generation or self._active_button != button:
                 return

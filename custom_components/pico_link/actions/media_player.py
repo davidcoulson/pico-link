@@ -153,6 +153,32 @@ class MediaPlayerActions:
                 f"media-{button}-tap",
             )
 
+    def prepare_override(
+        self, button: str, *, default_tap: bool
+    ) -> tuple[asyncio.Task[Any] | None, bool]:
+        """Cancel native volume work before an overridden button is handled."""
+        self._clear_volume_gesture()
+        return None, False
+
+    def invalidate_target(self) -> None:
+        self._target_volume = None
+
+    def start_hold(self, button: str) -> None:
+        """Begin the normal volume ramp without a second hold delay."""
+        self._clear_volume_gesture()
+        self._active_button = button
+        self._is_holding = True
+        self._target_volume = self._get_current_volume()
+        self._hold_task = self.ctrl.create_task(
+            self._hold_lifecycle(
+                button,
+                1 if button in {"on", "raise"} else -1,
+                self._gesture_generation,
+                wait=False,
+            ),
+            f"media-{button}-hold",
+        )
+
     def _gesture_is_current(
         self,
         button: str,
@@ -258,10 +284,13 @@ class MediaPlayerActions:
         button: str,
         direction: int,
         generation: int,
+        *,
+        wait: bool = True,
     ) -> None:
         """Ramp volume after the configured hold threshold."""
         try:
-            await asyncio.sleep(self.ctrl.utils._hold_time)
+            if wait:
+                await asyncio.sleep(self.ctrl.utils._hold_time)
 
             if not self._gesture_is_current(button, generation):
                 return

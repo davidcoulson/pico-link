@@ -16,6 +16,7 @@ from .actions.media_player import MediaPlayerActions
 from .actions.switch import SwitchActions
 from .config import PicoConfig
 from .const import DOMAIN, PICO_EVENT_TYPE, PICO_TYPE_MAP, SUPPORTED_BUTTONS
+from .overrides import ButtonOverrides
 
 # Profiles
 from .profiles.base import PicoProfile
@@ -91,6 +92,7 @@ class PicoController:
             )
 
         self._behavior: PicoProfile = behavior_class(self)
+        self._overrides = ButtonOverrides(self) if conf.overrides else None
 
     # =============================================================
     # TASK MANAGEMENT
@@ -176,6 +178,8 @@ class PicoController:
                 return
 
             try:
+                if self._overrides and self._overrides.handle(button, action):
+                    return
                 if action == "press":
                     self._behavior.handle_press(button)
                 else:
@@ -287,6 +291,8 @@ class PicoController:
             self._unsub_event = None
 
         # Let domain handlers clear their gesture-specific state.
+        if self._overrides:
+            self._overrides.reset()
         for action_handler in self.actions.values():
             reset = getattr(
                 action_handler,
