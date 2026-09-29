@@ -209,15 +209,16 @@ class LightActions:
         direction: int,
     ) -> int:
         """Return the next clamped brightness percentage."""
+        if current_percentage == 0:
+            # Start upward steps/ramps at the configured minimum. LOWER
+            # while the light is off must not turn it on.
+            return self.ctrl.conf.light_low_pct if direction > 0 else 0
+
         new_percentage = current_percentage + (
             self.ctrl.conf.light_step_pct * direction
         )
 
         if direction < 0:
-            # LOWER while the light is off should not turn it on.
-            if current_percentage == 0:
-                return 0
-
             new_percentage = max(
                 self.ctrl.conf.light_low_pct,
                 new_percentage,

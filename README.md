@@ -316,6 +316,12 @@ use their defaults.
 
 Brightness does not ramp below `light_low_pct`.
 
+When the light is off, the first RAISE tap or upward ramp step turns it on at
+`light_low_pct`. Subsequent steps add `light_step_pct`. For example, with a
+25% minimum and 10% steps, upward brightness commands are 25%, 35%, 45%, and
+so on. This also applies to ON holds on P2B and 2B remotes. A regular ON tap
+continues to use `light_on_pct`, and LOWER while off leaves the light off.
+
 Rapid repeated brightness taps use the most recently requested brightness for a
 short period instead of waiting for Home Assistant state to update.
 
