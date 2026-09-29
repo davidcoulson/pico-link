@@ -58,8 +58,10 @@ a timeout so a stuck gesture fails instead of hanging the entire run.
 The `Tests` workflow runs on pushes to `beta` and `main`, and on pull requests
 targeting either branch. It installs the same dependencies, runs lint checks,
 and runs the suite with a coverage report. Review failures in the repository's
-Actions tab before promoting a change. The workflow runs tests only: it does
-not deploy updates or change branch protection or the promotion script.
+Actions tab before promoting a change. The workflow runs tests only; it does
+not deploy updates. The `main` ruleset requires the **Pico Link regression
+tests** check from GitHub Actions before a promotion pull request can merge.
+See the [promotion workflow](../README.md#promoting-beta-to-main).
 
 ## Adding a regression test
 
