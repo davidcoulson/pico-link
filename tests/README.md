@@ -41,6 +41,7 @@ python -m pytest -q tests/test_gestures.py
 | --- | --- |
 | `test_light_brightness.py` | Minimum brightness from off, rapid taps with delayed state feedback, upward holds, normal On brightness, and brightness limits |
 | `test_configuration.py` | Timing defaults and overrides, normalization, invalid configurations, device-name precedence and ambiguity, entity deduplication, and action placeholders |
+| `test_type_detection.py` | Supported registry model formats, unknown/missing/non-Lutron models, explicit-type precedence, name/ID resolution, unchanged event checks, isolation of invalid remotes, and metadata changes between setups |
 | `test_setup_and_events.py` | Full HA setup, invalid and duplicate entries, event filtering, independent remotes, multiple targets, and shutdown cancellation |
 | `test_device_controls.py` | On/Off behavior for all three domain-controlling Pico models; shade position/direction, fan speeds/direction, volume limits/mute, and switches |
 | `test_gestures.py` | Tap/hold distinctions, release and direction changes, shade stop ordering, natural ramp limits, and concurrent remotes |
@@ -55,6 +56,13 @@ commands and observable errors rather than private implementation details.
 Hold tests use real timers with short configured intervals and wait for recorded
 commands; they do not replace the hold or ramp logic with a mock. Each test has
 a timeout so a stuck gesture fails instead of hanging the entire run.
+
+The shared `pico` harness and brightness fixture run their behavior tests twice:
+once with an explicit type and once with the type omitted and a real Home
+Assistant device registry record supplying the model. This checks the same
+tap, hold, double-tap, defaults, concurrency, and shutdown behavior through both
+configuration paths. Detection-specific tests also cover startup failures and
+confirm that button handling no longer needs the registry after setup.
 
 ## Automatic GitHub checks
 

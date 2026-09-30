@@ -6,7 +6,7 @@ DOMAIN = "pico_link"
 PICO_EVENT_TYPE = "lutron_caseta_button_event"
 
 # --------------------------------------------------------------------
-# VALID YAML TYPES (explicitly required in device config)
+# VALID PICO TYPES (explicitly configured or detected during setup)
 # --------------------------------------------------------------------
 VALID_PICO_TYPES = {
     "P2B",  # Paddle Pico

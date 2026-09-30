@@ -4,9 +4,10 @@ Use Lutron Pico remotes to control Home Assistant lights, shades, fans, media
 players, and switches. Keep each button's built-in behavior, replace its tap
 or hold with a list of actions, or add a double-tap action.
 
-**Version 0.3.13** adds optional tap, hold, and double-tap actions, plus shared
-Stop-button defaults. Existing configurations remain supported; new overrides
-are optional.
+**Version 0.3.14** makes the Pico `type` optional. Pico Link detects it from
+Home Assistant's stored Lutron model when omitted. An explicit `type` still
+takes precedence. Existing button actions and shared Stop defaults remain
+supported.
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
 ![GitHub release](https://img.shields.io/github/v/release/smartqasa/pico-link)
@@ -58,13 +59,15 @@ with values from your system:
 pico_link:
   devices:
     - name: Kitchen Pico
-      type: 3BRL
       lights: light.kitchen
 ```
 
 Restart Home Assistant after saving YAML changes. This example uses the normal
 light controls and the default timing; no extra settings or action overrides
 are needed.
+
+Pico Link detects this remote's type during setup. You can still specify
+`type: 3BRL` (or another supported type) on the device to select it explicitly.
 
 If you prefer a separate file, put this in `configuration.yaml`:
 
@@ -75,7 +78,25 @@ pico_link: !include pico_link.yaml
 The contents of `pico_link.yaml` then start with `devices:` (and optionally
 `defaults:`), without another `pico_link:` wrapper.
 
-### Choose the Pico type
+### Pico type: automatic or explicit
+
+The `type` setting is optional on each device:
+
+- **Omit `type`:** Pico Link reads the model stored by the Lutron Caséta
+  integration in Home Assistant's device registry and selects its button layout.
+- **Supply `type`:** that value takes precedence; auto-detection is skipped.
+  Existing configurations can keep their type settings unchanged.
+- **If detection fails:** Pico Link logs an error for that remote and continues
+  setting up other valid remotes. Specify its type explicitly, or correct the
+  missing model information, then restart Home Assistant.
+
+Detection recognizes the Lutron hardware type in the stored model, such as
+`PJ2-3BRL-GXX-X01 (Pico3ButtonRaiseLower)`. It does not guess from the device's
+name or model number alone. Detection runs during setup using local information;
+it does not contact the bridge or add a detection delay to each button press.
+If model information becomes available later, restart to retry detection.
+
+When specifying a type, use one of these values:
 
 | Type | Remote | Button names used in configuration |
 | --- | --- | --- |
@@ -89,7 +110,9 @@ including models with a favorite symbol. Use `stop_tap`, `stop_double_tap`, and
 `stop_hold` for new action configurations; the older `middle_button` setting
 remains supported. Button names refer to physical positions, even when their
 actions are overridden. Pico Link ignores events whose reported hardware type
-does not match the configured `type`.
+does not match the explicit or automatically detected type. An explicit type
+does not bypass this hardware check. Empty or invalid `type` values are errors;
+remove the key entirely to enable detection.
 
 ### Identify the remote
 
@@ -143,6 +166,7 @@ lists or the existing `buttons` mapping described below.
 
 Settings under `defaults` apply to every device unless that device supplies a
 replacement value, with the Stop and legacy middle-button exceptions below.
+The optional `type` is device-specific and is not inherited from `defaults`.
 Leave optional settings out to use Pico Link's defaults.
 
 ```yaml
@@ -660,11 +684,12 @@ retaining its existing tap. An explicit `button_1_tap` replaces that tap.
 ## Settings reference
 
 Settings can be placed on a device or under `defaults`, except `type`, which
-must be supplied on each device. Configure a unique name or device ID per Pico.
+is optional and only read from the individual device. Configure a unique name
+or device ID per Pico.
 
 | Setting | Default | Accepted values / purpose |
 | --- | --- | --- |
-| `type` | Required | `P2B`, `2B`, `3BRL`, `4B` |
+| `type` | Auto-detected | Optional per device: `P2B`, `2B`, `3BRL`, `4B`. An explicit value takes precedence. |
 | `name` / `device_id` | One required | Identify the Pico |
 | `lights`, `covers`, `fans`, `media_players`, `switches` | None | Exactly one group for non-4B remotes |
 | `<button>_tap` / `<button>_hold` | Existing behavior | Action list; `[]` disables the gesture |
@@ -700,8 +725,9 @@ shade motor moves.
 1. Confirm the Lutron Caséta integration is loaded.
 2. In Home Assistant's event tools, listen for `lutron_caseta_button_event` and
    press a Pico button. Verify both press and release events arrive.
-3. Match the configured `device_id` and Pico type to the event. For name-based
-   configuration, check the device registry name, including any room prefix.
+3. Match the configured `device_id` and the explicit or detected Pico type to
+   the event. For name-based configuration, check the device registry name,
+   including any room prefix.
 4. Confirm the assigned entities exist and support the requested actions.
 5. Check Home Assistant's logs for Pico Link validation or service-call errors.
 
@@ -717,6 +743,13 @@ If no valid devices remain, the log says
 `pico_link is configured, but no valid Pico devices were created`.
 The preceding messages identify the individual errors. Restart Home Assistant
 after correcting the configuration.
+
+If the log says it cannot detect the Pico type, check that the remote belongs
+to the Lutron Caséta integration and has a recognized model in the device
+registry. You can set `type` explicitly as described under
+[Pico type](#pico-type-automatic-or-explicit). A missing or unfamiliar model
+does not trigger a guessed layout or automatic retries; correct it or supply
+the type and restart.
 
 ### A tap feels slower after adding an override
 
