@@ -14,23 +14,25 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest_asyncio.fixture
-async def remote(hass, request):
+async def remote(hass, request, type_setting, register_pico):
     """Create a remote with real event dispatch and recorded light commands."""
     pico_type = getattr(request, "param", "3BRL")
-    conf = parse_pico_config(
-        hass,
-        {},
-        {
-            "device_id": "test-pico",
-            "type": pico_type,
-            "lights": "light.test",
-            "light_low_pct": 25,
-            "light_step_pct": 10,
-            "light_on_pct": 80,
-            "hold_time_ms": 100,
-            "step_time_ms": 100,
-        },
-    )
+    raw = {
+        "device_id": "test-pico",
+        "type": pico_type,
+        "lights": "light.test",
+        "light_low_pct": 25,
+        "light_step_pct": 10,
+        "light_on_pct": 80,
+        "hold_time_ms": 100,
+        "step_time_ms": 100,
+    }
+    if type_setting == "detected":
+        raw_type = next(raw for raw, kind in PICO_TYPE_MAP.items() if kind == pico_type)
+        device = register_pico(model=f"Test model ({raw_type})")
+        raw["device_id"] = device.id
+        raw.pop("type")
+    conf = parse_pico_config(hass, {}, raw)
     commands = []
     received = asyncio.Queue()
 

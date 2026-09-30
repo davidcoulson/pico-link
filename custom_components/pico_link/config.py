@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from homeassistant.core import HomeAssistant, valid_entity_id
 from homeassistant.helpers import device_registry as dr
 
-from .const import VALID_PICO_TYPES
+from .const import PICO_TYPE_MAP, VALID_PICO_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -182,6 +183,41 @@ def lookup_device_id(
             return matches[0].id
 
     return None
+
+
+def _detect_pico_type(hass: HomeAssistant, device_id: str) -> str:
+    """Read a supported Lutron type from the local registry during setup only."""
+    device = dr.async_get(hass).async_get(device_id)
+    hint = "Specify 'type' explicitly on this device, then restart Home Assistant."
+
+    if device is None:
+        raise ValueError(
+            f"Cannot detect Pico type for {device_id}: no device registry entry. {hint}"
+        )
+
+    lutron_entries = {
+        entry.entry_id for entry in hass.config_entries.async_entries("lutron_caseta")
+    }
+    if not device.config_entries.intersection(lutron_entries):
+        raise ValueError(
+            f"Cannot detect Pico type for {device_id}: device is not registered "
+            f"with the Lutron Caseta integration. {hint}"
+        )
+
+    # HA records models as "<model number> (<Lutron type>)". Accept the raw
+    # Lutron type too, but never infer a layout from a name or partial match.
+    model = device.model.strip() if isinstance(device.model, str) else ""
+    match = re.fullmatch(r"[^()]*\(([^()]+)\)", model)
+    raw_type = match.group(1).strip() if match else model
+    pico_type = PICO_TYPE_MAP.get(raw_type)
+    if pico_type is None:
+        raise ValueError(
+            f"Cannot detect Pico type for {device_id}: unrecognized or missing "
+            f"Lutron model {device.model!r}. {hint}"
+        )
+
+    _LOGGER.debug("Detected Pico type %s for device %s", pico_type, device_id)
+    return pico_type
 
 
 def _resolve_device_id(
@@ -537,15 +573,14 @@ def parse_pico_config(
     device_raw: dict[str, Any],
 ) -> PicoConfig:
     """Normalize and validate one Pico Link device configuration."""
-    raw_type = device_raw.get("type")
-
-    if raw_type is None:
-        raise ValueError("Device must define a 'type'.")
-
-    if not isinstance(raw_type, str) or not raw_type.strip():
-        raise ValueError("'type' must be a non-empty string.")
-
-    device_type = raw_type.strip().upper()
+    # An explicit type keeps its existing authority and validation. Only an
+    # omitted key enables detection; an empty or invalid value is still an error.
+    device_type = None
+    if "type" in device_raw:
+        raw_type = device_raw["type"]
+        if not isinstance(raw_type, str) or not raw_type.strip():
+            raise ValueError("'type' must be a non-empty string.")
+        device_type = raw_type.strip().upper()
 
     # Stop gesture defaults, including the legacy tap name, require an opt-in.
     # Device-level keys still go through model and action validation below.
@@ -560,6 +595,9 @@ def parse_pico_config(
         hass,
         merged,
     )
+
+    if device_type is None:
+        device_type = _detect_pico_type(hass, device_id)
 
     # ------------------------------------------------------------
     # ENTITY LISTS
@@ -732,9 +770,7 @@ def parse_pico_config(
 
     if device_type == "3BRL":
         if raw_middle_button == "default":
-            tap_default_key = (
-                "stop_tap" if "stop_tap" in defaults else "middle_button"
-            )
+            tap_default_key = "stop_tap" if "stop_tap" in defaults else "middle_button"
             middle_button = _normalize_action_list(
                 defaults.get(
                     tap_default_key,
@@ -775,7 +811,9 @@ def parse_pico_config(
         if button is None:
             continue
         if button not in valid_buttons:
-            raise ValueError(f"'{key}' is not a supported button override for {device_type}.")
+            raise ValueError(
+                f"'{key}' is not a supported button override for {device_type}."
+            )
         if key in STOP_GESTURES and value == "default":
             default_key = key
             if key == "stop_tap" and key not in defaults:
@@ -784,7 +822,9 @@ def parse_pico_config(
                 raise ValueError(f"'{key}: default' requires 'defaults.{key}'.")
             value = defaults[default_key]
         if not isinstance(value, list):
-            raise ValueError(f"'{key}' must be a list of actions; use [] to disable it.")
+            raise ValueError(
+                f"'{key}' must be a list of actions; use [] to disable it."
+            )
         overrides[key] = _normalize_action_list(value, context=key)
 
     # ------------------------------------------------------------
