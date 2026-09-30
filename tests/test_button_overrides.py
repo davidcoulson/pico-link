@@ -311,7 +311,7 @@ async def test_shutdown_cancels_detection_and_running_sequences(pico, recognized
         ("stop_hold", ["bad"]),
         ("middle_tap", []),
         ("button_1_hold", []),
-        ("on_double_tap", []),
+        ("on_triple_tap", []),
         ("raise_tap", [{"action": "light.turn_on", "target": {"entity_id": [42]}}]),
     ],
 )

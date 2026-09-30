@@ -46,6 +46,7 @@ python -m pytest -q tests/test_gestures.py
 | `test_gestures.py` | Tap/hold distinctions, release and direction changes, shade stop ordering, natural ramp limits, and concurrent remotes |
 | `test_custom_actions.py` | All four scene buttons, middle-button overrides, ordered completion, target/data preservation, service errors, and interrupted sequences |
 | `test_button_overrides.py` | Tap/hold overrides on every supported button, native fallback, legacy precedence, empty lists, release timing, cover stop ordering, shutdown, and five concurrent remotes |
+| `test_double_tap.py` | Every model/button, single-tap delay and fallback, native/custom holds, timing inheritance, slow/repeated taps, cross-button ordering, duplicate events, shutdown, cover stops, and concurrent remotes |
 
 The new integration tests enter through Home Assistant's setup interface and
 send Pico events through its event bus. Assertions check outgoing service
@@ -129,3 +130,17 @@ interrupted continuous hold stops before the replacement action runs.
 
 The automated concurrency tests use service doubles; they do not establish
 bridge throughput, real-world latency, or physical-device acceptance.
+
+For double tap, configure one button and compare it with an unconfigured
+button. Check the default 300 ms gap from release to the next press and a
+per-Pico timing override. One tap should wait and run once; two quick taps
+should run only the double action after the second release. Try slow taps,
+three/four rapid taps, and a tap followed by a hold. The hold must not also
+trigger tap/double-tap actions. If no hold exists, a long press should run
+the single action once at the hold threshold.
+
+Check that default brightness/volume holds still ramp at the hold threshold
+and stop on release, that changing buttons does not leave delayed commands
+behind, and that separate remotes respond independently. A restart during a
+pending tap must cancel it. Radio and network latency can affect the gap
+observed by Home Assistant, so physical testing remains necessary.

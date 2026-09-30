@@ -1,10 +1,11 @@
 # Pico Link
 
 Use Lutron Pico remotes to control Home Assistant lights, shades, fans, media
-players, and switches. Keep each button's built-in behavior or replace its tap
-or hold with a list of actions.
+players, and switches. Keep each button's built-in behavior, replace its tap
+or hold with a list of actions, or add a double-tap action.
 
-Tap/hold overrides are available in the **0.3.13 beta**. For the current stable
+Button overrides are available in the **0.3.13 beta**, with double tap added
+in **0.3.13b2**. For the current stable
 version, see the [stable README](https://github.com/smartqasa/pico-link/blob/main/README.md).
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
@@ -133,7 +134,7 @@ fan speed, and volume calculations use the **first entity** as the reference.
 For example, a brightness step calculates one value and sends it to every
 assigned light. Duplicate entity IDs are removed while preserving order.
 
-A 4B Pico does not take an entity group. Configure its buttons with tap/hold
+A 4B Pico does not take an entity group. Configure its buttons with gesture
 lists or the existing `buttons` mapping described below.
 
 ### Shared defaults
@@ -260,20 +261,21 @@ nothing. See the override example and the existing `buttons` format below.
 
 ## Button action overrides
 
-Add an optional `<button>_tap` or `<button>_hold` list to a device. Each list
+Add an optional `<button>_tap`, `<button>_hold`, or `<button>_double_tap` list
+to a device. Each list
 replaces **only that button's specified gesture**. It can call services for
 any entity, regardless of the remote's assigned entity group.
 
-| Physical button | Tap key | Hold key | Models |
-| --- | --- | --- | --- |
-| On | `on_tap` | `on_hold` | P2B, 2B, 3BRL |
-| Off | `off_tap` | `off_hold` | All |
-| Raise | `raise_tap` | `raise_hold` | 3BRL |
-| Lower | `lower_tap` | `lower_hold` | 3BRL |
-| Middle / Stop | `stop_tap` | `stop_hold` | 3BRL |
-| First scene button | `button_1_tap` | `button_1_hold` | 4B |
-| Second scene button | `button_2_tap` | `button_2_hold` | 4B |
-| Third scene button | `button_3_tap` | `button_3_hold` | 4B |
+| Physical button | Tap key | Hold key | Double-tap key | Models |
+| --- | --- | --- | --- | --- |
+| On | `on_tap` | `on_hold` | `on_double_tap` | P2B, 2B, 3BRL |
+| Off | `off_tap` | `off_hold` | `off_double_tap` | All |
+| Raise | `raise_tap` | `raise_hold` | `raise_double_tap` | 3BRL |
+| Lower | `lower_tap` | `lower_hold` | `lower_double_tap` | 3BRL |
+| Middle / Stop | `stop_tap` | `stop_hold` | `stop_double_tap` | 3BRL |
+| First scene button | `button_1_tap` | `button_1_hold` | `button_1_double_tap` | 4B |
+| Second scene button | `button_2_tap` | `button_2_hold` | `button_2_double_tap` | 4B |
+| Third scene button | `button_3_tap` | `button_3_hold` | `button_3_double_tap` | 4B |
 
 - **Omit a key** to retain its existing action, including existing
   `middle_button` or `buttons` actions for taps.
@@ -284,8 +286,11 @@ any entity, regardless of the remote's assigned entity group.
   the tap when held past the threshold. Remove the key to restore the default.
 - A custom hold runs **once** when `hold_time_ms` is reached. Releasing the
   button does not also run its tap action or cancel an already started list.
+- A configured double tap runs its list **once**, replacing both single taps.
+  An empty double-tap list consumes the double tap without running an action;
+  remove the key to restore ordinary independent taps and their original timing.
 - Existing brightness, shade, and volume holds retain their built-in behavior
-  unless overridden. Custom repetition and double-tap actions are not supported.
+  unless overridden. Custom action lists do not repeat while a button is held.
 
 ### Example: color-temperature taps with normal dimming holds
 
@@ -351,8 +356,8 @@ Without overrides, button timing stays as before. Built-in Raise/Lower steps
 for lights, covers, and media players start on press. Built-in P2B/2B On/Off
 controls for those domains distinguish taps from holds.
 
-When a button has an override and either a built-in or custom hold action,
-Pico Link waits to distinguish the gesture:
+When a button has a tap or hold override and either a built-in or custom hold
+action, Pico Link waits to distinguish the gesture. Without double tap configured:
 
 - Release before `hold_time_ms`: run the tap.
 - Keep holding to `hold_time_ms`: run the hold and suppress the tap.
@@ -360,13 +365,78 @@ Pico Link waits to distinguish the gesture:
 For example, overriding a Raise tap while keeping normal brightening means the
 first hold step happens at the hold threshold, instead of immediately on
 press. There is no additional hold delay after classification. A button with a
-tap override and no built-in or configured hold runs its tap on press.
+tap override and no built-in or configured hold runs its tap on press, unless
+double tap is also configured.
 Buttons without overrides retain their normal handling.
 
 The default hold threshold is 400 ms. The default interval between built-in
 brightness or volume ramp commands is 650 ms. Leave these settings out unless
 you want different timing. Network and device response time also affect the
 physical result.
+
+### Double-tap timing
+
+Double-tap detection is enabled **only for buttons with a `_double_tap` key**.
+Adding `double_tap_time_ms` alone does not enable it or delay other buttons.
+
+- Make two short presses of the **same button**. The second press must begin
+  before the window expires, measured from the **first release**. The default
+  window is **300 ms**.
+- The double-tap action runs on the **second release**, provided neither press
+  reaches `hold_time_ms`. The second release may occur after the double-tap
+  window; the gap between the presses determines whether they belong together.
+- A single tap waits for the window to expire, then runs its configured or
+  built-in tap action. A longer window is more forgiving but adds more delay
+  to single taps on that button.
+- Holding either press reaches the normal hold threshold without an additional
+  double-tap delay. The hold runs instead of the pending tap or double tap.
+  If the button has no built-in or custom hold, its single-tap action runs once
+  at the hold threshold instead. Releasing does not run another action.
+- Pressing a different button completes the previous pending single tap before
+  handling the new button. Different buttons and different Picos never combine
+  into a double tap. Three quick taps produce a double followed by a single;
+  four produce two doubles.
+
+Shade controls still stop an interrupted continuous movement before starting
+the next action. An unchanged On/Off tap that stops a moving shade also retains
+that immediate stop behavior, even with double tap configured.
+
+Set `double_tap_time_ms` under `defaults` to change the window for all Picos,
+or on one device to override it. It is independent of `hold_time_ms`; each
+accepts 100–2000 ms. Omit it to use 300 ms. Detection uses separate asynchronous
+timers for each remote; a waiting gesture does not block another remote.
+
+### Example: three actions on the middle button
+
+```yaml
+pico_link:
+  defaults:
+    double_tap_time_ms: 300  # Optional; this is already the default.
+  devices:
+    - name: Office Pico
+      type: 3BRL
+      lights: light.office
+      # Optional per-Pico adjustment; omit to inherit the shared/default window.
+      # double_tap_time_ms: 450
+      stop_tap:
+        - action: scene.turn_on
+          target:
+            entity_id: scene.office_relax
+      stop_double_tap:
+        - action: light.turn_on
+          target:
+            entity_id: lights
+          data:
+            brightness_pct: 100
+      stop_hold:
+        - action: script.turn_on
+          target:
+            entity_id: script.good_night
+```
+
+One short middle-button press recalls the scene after the window expires.
+Two quick presses set full brightness without first recalling the scene.
+A hold starts the script once. The other buttons keep their original timing.
 
 ### Example: tap and hold on a scene Pico
 
@@ -489,8 +559,10 @@ pico_link:
       middle_button: default
 ```
 
-An explicit `stop_tap` overrides that list. Adding only `stop_hold` retains the
-existing middle-button tap but defers it until a short press is released.
+An explicit `stop_tap` overrides that list. Adding `stop_hold` without
+`stop_tap` retains the existing middle-button tap but defers it until a short
+press is released. Adding `stop_double_tap` also retains that tap, with the
+additional wait for the double-tap window.
 
 ### `buttons` on 4B
 
@@ -535,9 +607,11 @@ must be supplied on each device. Configure a unique name or device ID per Pico.
 | `name` / `device_id` | One required | Identify the Pico |
 | `lights`, `covers`, `fans`, `media_players`, `switches` | None | Exactly one group for non-4B remotes |
 | `<button>_tap` / `<button>_hold` | Existing behavior | Action list; `[]` disables the gesture |
+| `<button>_double_tap` | Disabled | Action list; enables detection for that button. `[]` consumes double taps without an action |
 | `middle_button` | Domain behavior | 3BRL action list, or `default` to opt into the shared list |
 | `buttons` | None | 4B button-to-action mapping |
 | `hold_time_ms` | `400` | `100–2000` ms before a hold is recognized |
+| `double_tap_time_ms` | `300` | `100–2000` ms from first release to second press; used only for buttons with a double-tap key |
 | `step_time_ms` | `650` | `100–2000` ms between built-in brightness/volume ramp commands |
 | `light_on_pct` | `100` | `1–100`, brightness for built-in On taps |
 | `light_low_pct` | `5` | `1–99`, minimum ramp brightness and first upward step from off |
@@ -584,7 +658,9 @@ after correcting the configuration.
 ### A tap feels slower after adding an override
 
 A button with both tap and hold behavior must wait for release to recognize a
-tap. See [Tap and hold timing](#tap-and-hold-timing). Lowering the threshold also
+tap. A button with double tap configured also waits for its double-tap window
+before executing a single tap. See [Tap and hold timing](#tap-and-hold-timing)
+and [Double-tap timing](#double-tap-timing). Lowering the hold threshold also
 makes it easier to trigger a hold accidentally. Buttons without overrides keep
 their existing timing.
 

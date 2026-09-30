@@ -30,6 +30,15 @@ PICO_BUTTONS = {
 }
 
 
+def override_button(key: str) -> str | None:
+    """Extract a button using the longest gesture suffix first."""
+    for gesture in ("double_tap", "tap", "hold"):
+        suffix = f"_{gesture}"
+        if key.endswith(suffix):
+            return key[: -len(suffix)]
+    return None
+
+
 @dataclass
 class PicoConfig:
     """Normalized configuration for one Pico remote."""
@@ -46,6 +55,7 @@ class PicoConfig:
 
     # Normalized action parameters in milliseconds.
     hold_time_ms: int = 400
+    double_tap_time_ms: int = 300
     step_time_ms: int = 650
 
     # Cover configuration.
@@ -105,7 +115,7 @@ class PicoConfig:
             if not self.buttons and not self.overrides:
                 raise ValueError(
                     f"Pico {self.device_id} (4B) must define "
-                    "a non-empty 'buttons' mapping or button tap/hold overrides."
+                    "a non-empty 'buttons' mapping or button gesture overrides."
                 )
 
             if self.middle_button:
@@ -603,6 +613,13 @@ def parse_pico_config(
         max_val=2000,
     )
 
+    double_tap_time_ms = _normalize_int(
+        merged.get("double_tap_time_ms", 300),
+        default=300,
+        min_val=100,
+        max_val=2000,
+    )
+
     cover_open_pos = _normalize_int(
         merged.get(
             "cover_open_pos",
@@ -743,9 +760,11 @@ def parse_pico_config(
     overrides = {}
     valid_buttons = PICO_BUTTONS.get(device_type, frozenset())
     for key, value in merged.items():
-        if not isinstance(key, str) or not key.endswith(("_tap", "_hold")):
+        if not isinstance(key, str):
             continue
-        button = key.rsplit("_", 1)[0]
+        button = override_button(key)
+        if button is None:
+            continue
         if button not in valid_buttons:
             raise ValueError(f"'{key}' is not a supported button override for {device_type}.")
         if not isinstance(value, list):
@@ -765,6 +784,7 @@ def parse_pico_config(
         media_players=media_players,
         switches=switches,
         hold_time_ms=hold_time_ms,
+        double_tap_time_ms=double_tap_time_ms,
         step_time_ms=step_time_ms,
         cover_open_pos=cover_open_pos,
         cover_step_pct=cover_step_pct,
