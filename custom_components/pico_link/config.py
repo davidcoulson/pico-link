@@ -29,6 +29,8 @@ PICO_BUTTONS = {
     "4B": _VALID_4B_BUTTONS,
 }
 
+STOP_GESTURES = frozenset({"stop_tap", "stop_double_tap", "stop_hold"})
+
 
 def override_button(key: str) -> str | None:
     """Extract a button using the longest gesture suffix first."""
@@ -545,9 +547,13 @@ def parse_pico_config(
 
     device_type = raw_type.strip().upper()
 
-    # middle_button defaults require an explicit
-    # middle_button: default on the device.
-    merged = {key: value for key, value in defaults.items() if key != "middle_button"}
+    # Stop gesture defaults, including the legacy tap name, require an opt-in.
+    # Device-level keys still go through model and action validation below.
+    merged = {
+        key: value
+        for key, value in defaults.items()
+        if key != "middle_button" and key not in STOP_GESTURES
+    }
     merged.update(device_raw)
 
     device_id = _resolve_device_id(
@@ -726,12 +732,15 @@ def parse_pico_config(
 
     if device_type == "3BRL":
         if raw_middle_button == "default":
+            tap_default_key = (
+                "stop_tap" if "stop_tap" in defaults else "middle_button"
+            )
             middle_button = _normalize_action_list(
                 defaults.get(
-                    "middle_button",
+                    tap_default_key,
                     [],
                 ),
-                context="defaults.middle_button",
+                context=f"defaults.{tap_default_key}",
             )
         elif raw_middle_button is None:
             middle_button = []
@@ -767,6 +776,13 @@ def parse_pico_config(
             continue
         if button not in valid_buttons:
             raise ValueError(f"'{key}' is not a supported button override for {device_type}.")
+        if key in STOP_GESTURES and value == "default":
+            default_key = key
+            if key == "stop_tap" and key not in defaults:
+                default_key = "middle_button"
+            if default_key not in defaults:
+                raise ValueError(f"'{key}: default' requires 'defaults.{key}'.")
+            value = defaults[default_key]
         if not isinstance(value, list):
             raise ValueError(f"'{key}' must be a list of actions; use [] to disable it.")
         overrides[key] = _normalize_action_list(value, context=key)

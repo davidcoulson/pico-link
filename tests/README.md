@@ -47,6 +47,7 @@ python -m pytest -q tests/test_gestures.py
 | `test_custom_actions.py` | All four scene buttons, middle-button overrides, ordered completion, target/data preservation, service errors, and interrupted sequences |
 | `test_button_overrides.py` | Tap/hold overrides on every supported button, native fallback, legacy precedence, empty lists, release timing, cover stop ordering, shutdown, and five concurrent remotes |
 | `test_double_tap.py` | Every model/button, single-tap delay and fallback, native/custom holds, timing inheritance, slow/repeated taps, cross-button ordering, duplicate events, shutdown, cover stops, and concurrent remotes |
+| `test_stop_defaults.py` | Explicit Stop default opt-ins across mixed models, per-device replacement and disabling, per-remote placeholders, interchangeable legacy tap defaults, name precedence, and missing/invalid default validation |
 
 The new integration tests enter through Home Assistant's setup interface and
 send Pico events through its event bus. Assertions check outgoing service

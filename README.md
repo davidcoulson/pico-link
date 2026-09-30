@@ -5,8 +5,8 @@ players, and switches. Keep each button's built-in behavior, replace its tap
 or hold with a list of actions, or add a double-tap action.
 
 Button overrides are available in the **0.3.13 beta**, with double tap added
-in **0.3.13b2**. For the current stable
-version, see the [stable README](https://github.com/smartqasa/pico-link/blob/main/README.md).
+in **0.3.13b2** and shared Stop gesture defaults in **0.3.13b3**. For the current
+stable version, see the [stable README](https://github.com/smartqasa/pico-link/blob/main/README.md).
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
 ![GitHub release](https://img.shields.io/github/v/release/smartqasa/pico-link)
@@ -84,10 +84,12 @@ The contents of `pico_link.yaml` then start with `devices:` (and optionally
 | `3BRL` | Five-button Pico with Raise/Lower | `on`, `raise`, `stop`, `lower`, `off` |
 | `4B` | Four-button scene Pico | `button_1`, `button_2`, `button_3`, `off` |
 
-`stop` is the middle button on a 3BRL Pico, including models with a favorite
-symbol. Button names refer to physical positions, even when their actions are
-overridden. Pico Link ignores events whose reported hardware type does not
-match the configured `type`.
+**Stop and middle button refer to the same physical button** on a 3BRL Pico,
+including models with a favorite symbol. Use `stop_tap`, `stop_double_tap`, and
+`stop_hold` for new action configurations; the older `middle_button` setting
+remains supported. Button names refer to physical positions, even when their
+actions are overridden. Pico Link ignores events whose reported hardware type
+does not match the configured `type`.
 
 ### Identify the remote
 
@@ -140,7 +142,8 @@ lists or the existing `buttons` mapping described below.
 ### Shared defaults
 
 Settings under `defaults` apply to every device unless that device supplies a
-replacement value. Leave optional settings out to use Pico Link's defaults.
+replacement value, with the Stop and legacy middle-button exceptions below.
+Leave optional settings out to use Pico Link's defaults.
 
 ```yaml
 pico_link:
@@ -160,9 +163,35 @@ pico_link:
 ```
 
 Action overrides can also be shared this way; a device's list replaces the
-whole inherited list. Shared override keys must be valid for **every remote
-that inherits them**. Prefer device-level overrides when mixing Pico models.
-The existing `middle_button` setting has a separate opt-in rule described below.
+whole inherited list for that gesture.
+
+- **`stop_tap`, `stop_double_tap`, and `stop_hold`:** a **3BRL** opts into each
+  shared list separately with, for example, `stop_tap: default` on the device.
+  Shared lists are used only by devices that opt in, including the older tap
+  setting described next. P2B, 2B, and 4B remotes do not inherit these settings.
+- **`middle_button`:** keeps its opt-in rule with `middle_button: default`.
+  It is the older name for the Stop tap action. Either tap name can use a
+  shared list named `stop_tap` or `middle_button`; `defaults.stop_tap` wins
+  when both shared lists exist.
+- **Other gesture defaults:** their keys must be valid for every remote that
+  inherits them. Prefer device-level overrides when mixing Pico models.
+
+For each Stop gesture on an individual 3BRL:
+
+- Use `default` to select its shared list.
+- Supply an action list to use that device's own actions.
+- Use `[]` to disable that gesture.
+- Omit the key to keep existing behavior, without selecting a shared list.
+
+If a device supplies both `stop_tap` and `middle_button`, `stop_tap` wins.
+Requesting `stop_tap: default`, `stop_double_tap: default`, or `stop_hold: default`
+without a corresponding shared list is a configuration error. For tap,
+`defaults.middle_button` is also accepted as that shared list. See the
+[shared Stop example](#example-shared-stop-tap-double-tap-and-hold).
+
+If an earlier beta configuration used Stop gesture lists under `defaults`, add
+the corresponding `: default` selections to the 3BRL devices that should use
+them. Automatic inheritance of Stop gestures has been replaced by this opt-in.
 
 ## Default button behavior
 
@@ -278,7 +307,9 @@ any entity, regardless of the remote's assigned entity group.
 | Third scene button | `button_3_tap` | `button_3_hold` | `button_3_double_tap` | 4B |
 
 - **Omit a key** to retain its existing action, including existing
-  `middle_button` or `buttons` actions for taps.
+  `middle_button` or `buttons` actions for taps. Stop gestures do not inherit
+  shared actions unless the device selects `default` for that gesture.
+- **Use `default` on a Stop gesture** to select its action list from `defaults`.
 - **Supply an action list** to replace that gesture. An explicit `stop_tap`
   takes precedence over `middle_button`; a 4B tap key takes precedence over
   that button's entry in `buttons`.
@@ -406,37 +437,58 @@ or on one device to override it. It is independent of `hold_time_ms`; each
 accepts 100–2000 ms. Omit it to use 300 ms. Detection uses separate asynchronous
 timers for each remote; a waiting gesture does not block another remote.
 
-### Example: three actions on the middle button
+### Example: shared Stop tap, double tap, and hold
 
 ```yaml
 pico_link:
   defaults:
-    double_tap_time_ms: 300  # Optional; this is already the default.
+    stop_tap:
+      - action: scene.turn_on
+        target:
+          entity_id: scene.relax
+    stop_double_tap:
+      - action: scene.turn_on
+        target:
+          entity_id: scene.bright
+    stop_hold:
+      - action: script.turn_on
+        target:
+          entity_id: script.good_night
+
   devices:
     - name: Office Pico
       type: 3BRL
       lights: light.office
-      # Optional per-Pico adjustment; omit to inherit the shared/default window.
-      # double_tap_time_ms: 450
+      stop_tap: default
+      stop_double_tap: default
+      stop_hold: default
+
+    - name: Bedroom Pico
+      type: 3BRL
+      lights: light.bedroom
       stop_tap:
         - action: scene.turn_on
           target:
-            entity_id: scene.office_relax
-      stop_double_tap:
-        - action: light.turn_on
-          target:
-            entity_id: lights
-          data:
-            brightness_pct: 100
-      stop_hold:
-        - action: script.turn_on
-          target:
-            entity_id: script.good_night
+            entity_id: scene.bedroom_relax
+      stop_double_tap: default
+      stop_hold: default
+
+    - name: Hallway Pico
+      type: 2B
+      lights: light.hallway
+      # No Stop settings; On/Off keep their normal behavior.
 ```
 
-One short middle-button press recalls the scene after the window expires.
-Two quick presses set full brightness without first recalling the scene.
-A hold starts the script once. The other buttons keep their original timing.
+On the Office Pico, one short Stop press recalls the relax scene after the
+default 300 ms window expires. Two quick presses recall the bright scene
+without first recalling relax. A hold starts the script once. The Bedroom
+Pico substitutes its own scene for a single tap. The other buttons keep their
+original timing.
+
+Replace the scene and script IDs with ones that exist in your system. Each
+shared action list runs only on remotes that opt into it. If you use an entity
+placeholder such as `lights`, each remote selecting that list must have that
+entity group; otherwise give it its own action list with suitable targets.
 
 ### Example: tap and hold on a scene Pico
 
@@ -529,7 +581,8 @@ Existing configurations continue to work without being rewritten.
 
 ### `middle_button` on 3BRL
 
-`middle_button` remains a supported way to replace the middle-button press.
+`middle_button` remains a supported way to replace the Stop (middle) button press.
+For new configurations, prefer `stop_tap`, `stop_double_tap`, and `stop_hold`.
 An omitted or empty `middle_button` keeps the domain's normal middle-button
 action. This differs from `stop_tap: []`, which explicitly disables the tap.
 
@@ -559,7 +612,15 @@ pico_link:
       middle_button: default
 ```
 
-An explicit `stop_tap` overrides that list. Adding `stop_hold` without
+You can migrate the shared tap list from `defaults.middle_button` to
+`defaults.stop_tap` while leaving existing `middle_button: default` entries
+in place. Conversely, `stop_tap: default` can use a shared `middle_button` list.
+When both shared names exist, `defaults.stop_tap` wins. The legacy
+`middle_button: default` with neither shared list present retains its old
+behavior: use the domain's normal middle-button action.
+
+A device's `stop_tap` overrides its `middle_button`, including when
+`stop_tap` selects `default` or supplies `[]`. Adding `stop_hold` without
 `stop_tap` retains the existing middle-button tap but defers it until a short
 press is released. Adding `stop_double_tap` also retains that tap, with the
 additional wait for the double-tap window.
@@ -608,7 +669,9 @@ must be supplied on each device. Configure a unique name or device ID per Pico.
 | `lights`, `covers`, `fans`, `media_players`, `switches` | None | Exactly one group for non-4B remotes |
 | `<button>_tap` / `<button>_hold` | Existing behavior | Action list; `[]` disables the gesture |
 | `<button>_double_tap` | Disabled | Action list; enables detection for that button. `[]` consumes double taps without an action |
-| `middle_button` | Domain behavior | 3BRL action list, or `default` to opt into the shared list |
+| `stop_tap`, `stop_double_tap`, `stop_hold` on a 3BRL | Existing behavior | Action list, `[]` to disable, or `default` to select the shared list for that gesture |
+| `stop_tap`, `stop_double_tap`, `stop_hold` under `defaults` | Not set | Shared lists; used only when a 3BRL explicitly selects `default` |
+| `middle_button` | Domain behavior | Older 3BRL tap setting, still supported; action list, or `default` to opt into the shared list |
 | `buttons` | None | 4B button-to-action mapping |
 | `hold_time_ms` | `400` | `100–2000` ms before a hold is recognized |
 | `double_tap_time_ms` | `300` | `100–2000` ms from first release to second press; used only for buttons with a double-tap key |
