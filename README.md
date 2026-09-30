@@ -4,9 +4,9 @@ Use Lutron Pico remotes to control Home Assistant lights, shades, fans, media
 players, and switches. Keep each button's built-in behavior, replace its tap
 or hold with a list of actions, or add a double-tap action.
 
-Button overrides are available in the **0.3.13 beta**, with double tap added
-in **0.3.13b2** and shared Stop gesture defaults in **0.3.13b3**. For the current
-stable version, see the [stable README](https://github.com/smartqasa/pico-link/blob/main/README.md).
+**Version 0.3.13** adds optional tap, hold, and double-tap actions, plus shared
+Stop-button defaults. Existing configurations remain supported; new overrides
+are optional.
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
 ![GitHub release](https://img.shields.io/github/v/release/smartqasa/pico-link)
