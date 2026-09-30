@@ -134,6 +134,30 @@ class LightActions:
     # BRIGHTNESS TARGET STATE
     # =============================================================
 
+    def prepare_override(
+        self, button: str, *, default_tap: bool
+    ) -> tuple[asyncio.Task[Any] | None, bool]:
+        """Cancel a previous native gesture without discarding tap targets."""
+        self._clear_gesture()
+        return None, False
+
+    def invalidate_target(self) -> None:
+        self._clear_brightness_target()
+
+    def start_hold(self, button: str) -> None:
+        """Start a native hold after the override router classified it."""
+        generation = self._begin_gesture(button)
+        self._is_holding = True
+        self._hold_task = self.ctrl.create_task(
+            self._hold_lifecycle(
+                button,
+                1 if button in {"on", "raise"} else -1,
+                generation,
+                wait=False,
+            ),
+            f"light-{button}-hold",
+        )
+
     def _set_brightness_target(self, percentage: int) -> None:
         """Store the latest requested brightness percentage."""
         self._target_brightness_pct = max(
@@ -411,10 +435,13 @@ class LightActions:
         button: str,
         direction: int,
         generation: int,
+        *,
+        wait: bool = True,
     ) -> None:
         """Begin continuous ramping after the hold threshold."""
         try:
-            await asyncio.sleep(self.ctrl.utils._hold_time)
+            if wait:
+                await asyncio.sleep(self.ctrl.utils._hold_time)
 
             if not self._gesture_is_current(
                 button,
