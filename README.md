@@ -4,7 +4,7 @@ Use Lutron Pico remotes to control Home Assistant lights, shades, fans, media
 players, and switches. Keep each button's built-in behavior, replace its tap
 or hold with a list of actions, or add a double-tap action.
 
-**Beta 0.3.14b1** makes the Pico `type` optional. Pico Link detects it from
+**Version 0.3.14** makes the Pico `type` optional. Pico Link detects it from
 Home Assistant's stored Lutron model when omitted. An explicit `type` still
 takes precedence. Existing button actions and shared Stop defaults remain
 supported.
