@@ -14,7 +14,7 @@ supported.
 ![GitHub License](https://img.shields.io/github/license/smartqasa/pico-link)
 
 <p align="center">
-  <img src="pico.png" width="180" alt="Pico remote">
+  <img src="https://raw.githubusercontent.com/smartqasa/pico-link/main/pico.png" width="180" alt="Pico remote">
 </p>
 
 - [Installation](#installation)
