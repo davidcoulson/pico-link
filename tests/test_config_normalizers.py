@@ -215,3 +215,42 @@ def test_validate_2brl_rejects_stop_only_features():
 
     with pytest.raises(ValueError, match="Only P2B, 2B, and 3BRL"):
         _config(type="2BRL", accent_lights=["light.b"]).validate()
+
+
+def test_validate_light_hold_color_temp():
+    _config(light_hold_color_temp=True).validate()
+    _config(type="2BRL", light_hold_color_temp=True).validate()
+
+    # STOP's own actions are unaffected by it.
+    _config(
+        light_hold_color_temp=True,
+        middle_button=[{"action": "x.y"}],
+        stop_hold=[{"action": "x.y"}],
+    ).validate()
+
+    # P2B/2B already ramp brightness from ON/OFF holds.
+    for pico_type in ("P2B", "2B"):
+        with pytest.raises(ValueError, match="Only 2BRL and 3BRL"):
+            _config(type=pico_type, light_hold_color_temp=True).validate()
+
+    with pytest.raises(ValueError, match="without 'lights'"):
+        _config(lights=[], fans=["fan.a"], light_hold_color_temp=True).validate()
+
+    with pytest.raises(ValueError, match="'accent_lights' and 'light_hold_color_temp'"):
+        _config(accent_lights=["light.b"], light_hold_color_temp=True).validate()
+
+    for field_name in ("on_hold", "off_hold", "on_double_tap", "off_double_tap"):
+        with pytest.raises(ValueError, match=f"alongside '{field_name}'"):
+            _config(
+                light_hold_color_temp=True,
+                **{field_name: [{"action": "x.y"}]},
+            ).validate()
+
+
+async def test_parse_light_hold_color_temp_defaults_off():
+    base = {"device_id": "dev", "type": "2BRL", "lights": ["light.a"]}
+
+    assert (await parse_pico_config(None, base)).light_hold_color_temp is False
+    assert (
+        await parse_pico_config(None, {**base, "light_hold_color_temp": True})
+    ).light_hold_color_temp is True

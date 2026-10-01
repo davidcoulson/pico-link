@@ -10,7 +10,11 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.script import async_validate_actions_config
 
-from .const import ACCENT_LIGHT_PICO_TYPES, VALID_PICO_TYPES
+from .const import (
+    ACCENT_LIGHT_PICO_TYPES,
+    RAISE_LOWER_PICO_TYPES,
+    VALID_PICO_TYPES,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,6 +74,13 @@ class PicoConfig:
     light_transition_on: int = 0
     light_transition_off: int = 0
     light_on_off_toggle: bool = False
+
+    # 2BRL and 3BRL only (P2B/2B already use ON/OFF holds for
+    # brightness). Holding ON ramps the light(s) cooler and holding OFF
+    # ramps them warmer, leaving RAISE/LOWER on brightness; taps still
+    # turn the light on and off, resolved on release. ON/OFF can't also
+    # run custom hold or double-tap actions (see validate()).
+    light_hold_color_temp: bool = False
 
     # A non-empty accent_lights list puts the Pico into dual-light
     # mode: ON switches to the center light(s) in `lights`. On P2B/2B,
@@ -262,6 +273,48 @@ class PicoConfig:
                     f"Pico {self.device_id} defines both 'middle_button' "
                     "and 'light_presets'. STOP can run custom actions or "
                     "cycle light presets, not both."
+                )
+
+        if self.light_hold_color_temp:
+            if self.type not in RAISE_LOWER_PICO_TYPES:
+                raise ValueError(
+                    f"Pico {self.device_id} ({self.type}) cannot define "
+                    "'light_hold_color_temp'. Only 2BRL and 3BRL Picos "
+                    "adjust color temperature from ON/OFF holds; P2B and "
+                    "2B already use those holds for brightness."
+                )
+
+            if not self.lights:
+                raise ValueError(
+                    f"Pico {self.device_id} defines "
+                    "'light_hold_color_temp' without 'lights'."
+                )
+
+            if self.accent_lights:
+                raise ValueError(
+                    f"Pico {self.device_id} defines both 'accent_lights' "
+                    "and 'light_hold_color_temp'. Configure one or the "
+                    "other, not both."
+                )
+
+            claimed = [
+                name
+                for name, actions in (
+                    ("on_hold", self.on_hold),
+                    ("off_hold", self.off_hold),
+                    ("on_double_tap", self.on_double_tap),
+                    ("off_double_tap", self.off_double_tap),
+                )
+                if actions
+            ]
+
+            if claimed:
+                raise ValueError(
+                    f"Pico {self.device_id} defines "
+                    "'light_hold_color_temp' alongside "
+                    f"{', '.join(repr(name) for name in claimed)}. Holding "
+                    "ON/OFF adjusts color temperature, so those buttons "
+                    "can't also run custom hold or double-tap actions."
                 )
 
         for button, hold_actions, double_tap_actions in (
@@ -959,6 +1012,14 @@ async def parse_pico_config(
         default=False,
     )
 
+    light_hold_color_temp = _normalize_bool(
+        merged.get(
+            "light_hold_color_temp",
+            False,
+        ),
+        default=False,
+    )
+
     accent_light_presets = _normalize_accent_presets(
         merged.get("accent_light_presets"),
     )
@@ -1098,6 +1159,7 @@ async def parse_pico_config(
         light_transition_on=light_transition_on,
         light_transition_off=light_transition_off,
         light_on_off_toggle=light_on_off_toggle,
+        light_hold_color_temp=light_hold_color_temp,
         accent_light_presets=accent_light_presets,
         light_presets=light_presets,
         media_player_vol_step=media_player_vol_step,

@@ -76,6 +76,15 @@ class LightActions:
                        next/previous effect in its effect list (tap
                        only, no ramp); otherwise adjust the center
                        light(s) brightness as usual
+
+    2BRL / 3BRL with light_hold_color_temp:
+        ON tap      -> turn on, as above, but resolved on release
+        ON hold     -> ramp color temperature cooler; turns the light
+                       on first if it's off
+        OFF tap     -> turn off, as above, but resolved on release
+        OFF hold    -> ramp color temperature warmer; no-op while off
+        RAISE/LOWER and STOP are unchanged. Each step moves
+        light_step_pct of the light's color temperature range.
     """
 
     MAX_RAMP_STEPS = 50
@@ -109,6 +118,12 @@ class LightActions:
         self._target_effect: Optional[str] = None
         self._effect_updated_at = 0.0
 
+        # light_hold_color_temp: the most recently requested color
+        # temperature, so a ramp (or a second hold right after one)
+        # builds on what was asked for rather than lagging state.
+        self._target_kelvin: Optional[int] = None
+        self._kelvin_updated_at = 0.0
+
     # =============================================================
     # PROFILE HELPERS
     # =============================================================
@@ -116,6 +131,24 @@ class LightActions:
     def _supports_onoff_hold(self) -> bool:
         """Return True when ON/OFF must distinguish taps from holds."""
         return self.ctrl.conf.type in ON_OFF_PICO_TYPES
+
+    def _hold_adjusts_color_temp(self) -> bool:
+        """Return True when holding ON/OFF ramps color temperature (2BRL/3BRL)."""
+        return self.ctrl.conf.light_hold_color_temp
+
+    def _resolves_on_off_on_release(self) -> bool:
+        """Return True when an ON/OFF tap waits for release to rule out a hold."""
+        return self._supports_onoff_hold() or self._hold_adjusts_color_temp()
+
+    def owns_on_off_gestures(self) -> bool:
+        """
+        Tell a 2BRL/3BRL profile to hand ON/OFF presses and releases here.
+
+        Those profiles otherwise fire the ON/OFF tap on press and run any
+        custom hold actions alongside it, which would turn the light off
+        before an OFF hold could ramp it warmer.
+        """
+        return self._hold_adjusts_color_temp()
 
     def _dual_light_mode(self) -> bool:
         """Return True when ON/OFF switch between center and accent lights."""
@@ -739,7 +772,7 @@ class LightActions:
     # =============================================================
 
     def press_on(self) -> None:
-        if self._supports_onoff_hold():
+        if self._resolves_on_off_on_release():
             self._start_onoff_gesture(
                 "on",
                 direction=1,
@@ -750,14 +783,14 @@ class LightActions:
         self._tap_on()
 
     def release_on(self) -> None:
-        if self._supports_onoff_hold():
+        if self._resolves_on_off_on_release():
             self._release_onoff_gesture(
                 "on",
                 tap_action=lambda: self._tap_on("light-on-tap"),
             )
 
     def press_off(self) -> None:
-        if self._supports_onoff_hold():
+        if self._resolves_on_off_on_release():
             self._start_onoff_gesture(
                 "off",
                 direction=-1,
@@ -768,7 +801,7 @@ class LightActions:
         self._tap_off()
 
     def release_off(self) -> None:
-        if self._supports_onoff_hold():
+        if self._resolves_on_off_on_release():
             self._release_onoff_gesture(
                 "off",
                 tap_action=lambda: self._tap_off("light-off-tap"),
@@ -836,7 +869,7 @@ class LightActions:
         button: str,
         direction: int,
     ) -> None:
-        """Start a P2B/2B ON or OFF tap-versus-hold gesture."""
+        """Start an ON or OFF tap-versus-hold gesture (P2B/2B, or light_hold_color_temp)."""
         generation = self._begin_gesture(button)
 
         self._arm_hold(
@@ -851,7 +884,7 @@ class LightActions:
         *,
         tap_action: TapAction,
     ) -> None:
-        """Complete a P2B/2B ON or OFF gesture."""
+        """Complete an ON or OFF tap-versus-hold gesture."""
         # Ignore a release belonging to an older gesture.
         if self._active_button != button:
             return
@@ -921,6 +954,14 @@ class LightActions:
                 return
 
             self._is_holding = True
+
+            if button in ("on", "off") and self._hold_adjusts_color_temp():
+                await self._ramp_color_temp(
+                    button,
+                    direction,
+                    generation,
+                )
+                return
 
             # An ON hold ramps the center light, so the accent light
             # must not remain on at the same time. The next OFF should
@@ -1055,6 +1096,161 @@ class LightActions:
         )
 
     # =============================================================
+    # COLOR TEMPERATURE (light_hold_color_temp)
+    # =============================================================
+
+    def _color_temp_bounds(self) -> Optional[tuple[int, int]]:
+        """
+        Return the primary light's (min, max) color temperature in kelvin.
+
+        These are capability attributes, so a light that supports color
+        temperature reports them even while it's off. None means it
+        doesn't support color temperature at all.
+        """
+        state = self.ctrl.utils.get_entity_state()
+
+        if not state:
+            return None
+
+        try:
+            low = int(state.attributes["min_color_temp_kelvin"])
+            high = int(state.attributes["max_color_temp_kelvin"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        if low >= high:
+            return None
+
+        return low, high
+
+    def _set_color_temp_target(self, kelvin: int) -> None:
+        """Store the latest requested color temperature."""
+        self._target_kelvin = kelvin
+        self._kelvin_updated_at = time.monotonic()
+
+    def _clear_color_temp_target(self) -> None:
+        """Discard the optimistic color temperature target."""
+        self._target_kelvin = None
+        self._kelvin_updated_at = 0.0
+
+    def _color_temp_for_step(
+        self,
+        bounds: tuple[int, int],
+    ) -> Optional[int]:
+        """
+        Return the color temperature the next ramp step should move from.
+
+        Prefers a recent requested value, like the brightness target.
+        None while the light is off (or hasn't reported being on yet,
+        right after an ON hold turned it on). A light that's on but
+        showing a color rather than a white starts from the middle of
+        its range.
+        """
+        low, high = bounds
+
+        if (
+            self._target_kelvin is not None
+            and time.monotonic() - self._kelvin_updated_at <= self.TARGET_CACHE_SECONDS
+        ):
+            return self._target_kelvin
+
+        state = self.ctrl.utils.get_entity_state()
+
+        if not state or state.state != "on":
+            return None
+
+        try:
+            kelvin = int(state.attributes["color_temp_kelvin"])
+        except (KeyError, TypeError, ValueError):
+            return (low + high) // 2
+
+        return max(low, min(high, kelvin))
+
+    async def _ramp_color_temp(
+        self,
+        button: str,
+        direction: int,
+        generation: int,
+    ) -> None:
+        """
+        Step color temperature until released or at the end of the range.
+
+        direction > 0 (ON) ramps cooler and turns the light on first if
+        it's off; direction < 0 (OFF) ramps warmer and does nothing to a
+        light that's off.
+        """
+        bounds = self._color_temp_bounds()
+
+        if bounds is None:
+            _LOGGER.debug(
+                "Device %s: %s doesn't report a color temperature range; "
+                "ignoring %s hold",
+                self.ctrl.conf.device_id,
+                self.ctrl.utils.primary_entity("light"),
+                button,
+            )
+            return
+
+        low, high = bounds
+        step = max(1, round((high - low) * self.ctrl.conf.light_step_pct / 100))
+
+        brightness = self._brightness_for_step()
+
+        if brightness is None:
+            return
+
+        if brightness == 0:
+            if direction < 0:
+                return
+
+            percentage = self.ctrl.conf.light_on_pct
+            self._set_brightness_target(percentage)
+            self._light_preset_index = None
+            await self._turn_on(percentage)
+
+        for _ in range(self.MAX_RAMP_STEPS):
+            if not self._gesture_is_current(
+                button,
+                generation,
+            ):
+                return
+
+            current = self._color_temp_for_step(bounds)
+
+            if current is None:
+                # Just turned on: give the light a step to report its
+                # color temperature before ramping from it.
+                await asyncio.sleep(self.ctrl.utils._step_time)
+                continue
+
+            new = max(low, min(high, current + step * direction))
+
+            if new == current:
+                return
+
+            self._set_color_temp_target(new)
+
+            await self._set_color_temp(new)
+
+            if not self._gesture_is_current(
+                button,
+                generation,
+            ):
+                return
+
+            await asyncio.sleep(self.ctrl.utils._step_time)
+
+    async def _set_color_temp(
+        self,
+        kelvin: int,
+    ) -> None:
+        await self.ctrl.utils.call_service(
+            "turn_on",
+            {"color_temp_kelvin": kelvin},
+            domain="light",
+        )
+
+    # =============================================================
     # LIFECYCLE
     # =============================================================
 
@@ -1072,3 +1268,4 @@ class LightActions:
         self._light_preset_index = None
         self._target_effect = None
         self._effect_updated_at = 0.0
+        self._clear_color_temp_target()

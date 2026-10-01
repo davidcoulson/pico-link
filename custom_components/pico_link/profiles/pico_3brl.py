@@ -20,6 +20,11 @@ class Pico3ButtonRaiseLower(HoldDoubleTapGestures):
 
     RAISE and LOWER are unaffected by any of this: they always ramp
     brightness/position/volume on hold, exactly as before.
+
+    A domain handler can take ON and OFF over entirely instead (lights
+    with light_hold_color_temp, which ramp color temperature on hold):
+    it then gets both the press and the release and resolves tap versus
+    hold itself, the way P2B/2B lights always do.
     """
 
     _HOLD_ACTION_FIELDS = {
@@ -67,12 +72,26 @@ class Pico3ButtonRaiseLower(HoldDoubleTapGestures):
 
         return actions
 
+    @staticmethod
+    def _domain_owns_on_off(actions: Any, button: str) -> bool:
+        """True when the domain handler resolves this ON/OFF gesture itself."""
+        if button not in ("on", "off"):
+            return False
+
+        owns = getattr(actions, "owns_on_off_gestures", None)
+
+        return bool(owns and owns())
+
     # -------------------------------------------------------------
     # PRESS
     # -------------------------------------------------------------
     def handle_press(self, button: str) -> None:
         actions = self._actions()
         if not actions:
+            return
+
+        if self._domain_owns_on_off(actions, button):
+            getattr(actions, f"press_{button}")()
             return
 
         if button in self._TAP_METHODS:
@@ -96,6 +115,10 @@ class Pico3ButtonRaiseLower(HoldDoubleTapGestures):
     def handle_release(self, button: str) -> None:
         actions = self._actions()
         if not actions:
+            return
+
+        if self._domain_owns_on_off(actions, button):
+            getattr(actions, f"release_{button}")()
             return
 
         if button in self._TAP_METHODS:

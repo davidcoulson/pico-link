@@ -13,8 +13,14 @@ from custom_components.pico_link.profiles.pico_2brl import Pico2ButtonRaiseLower
 
 
 class _Actions:
-    def __init__(self, calls):
+    """Records every action called on it; owns_on_off_gestures is a query, not one."""
+
+    def __init__(self, calls, *, owns_on_off=False):
         self._calls = calls
+        self._owns_on_off = owns_on_off
+
+    def owns_on_off_gestures(self):
+        return self._owns_on_off
 
     def __getattr__(self, name):
         def record(*args, **kwargs):
@@ -40,10 +46,10 @@ class _Utils:
 
 
 class _Ctrl:
-    def __init__(self, calls):
+    def __init__(self, calls, *, owns_on_off=False):
         self.conf = _Conf()
         self.utils = _Utils()
-        self.actions = {"light": _Actions(calls)}
+        self.actions = {"light": _Actions(calls, owns_on_off=owns_on_off)}
 
     def create_task(self, coro, name):
         coro.close()
@@ -87,3 +93,26 @@ def test_2brl_ignores_buttons_it_does_not_have():
     profile.handle_press("button_1")
 
     assert calls == []
+
+
+def test_2brl_hands_on_off_to_a_domain_that_owns_them():
+    """light_hold_color_temp: the light resolves ON/OFF tap vs. hold itself."""
+    calls: list[str] = []
+    profile = Pico2ButtonRaiseLower(_Ctrl(calls, owns_on_off=True))
+
+    for button in ("on", "off", "raise", "lower"):
+        profile.handle_press(button)
+        profile.handle_release(button)
+
+    # ON/OFF now get their releases too (the tap fires there), and
+    # RAISE/LOWER are untouched.
+    assert calls == [
+        "press_on",
+        "release_on",
+        "press_off",
+        "release_off",
+        "press_raise",
+        "release_raise",
+        "press_lower",
+        "release_lower",
+    ]

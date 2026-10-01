@@ -33,6 +33,9 @@
   [Dual-light mode](#dual-light-mode).
 - **Light on/off toggle option** — ON and OFF can each independently toggle
   a light's state instead of always issuing a discrete turn-on/turn-off.
+- **Color temperature from ON/OFF holds (2BRL, 3BRL)** — holding ON makes a
+  light cooler and holding OFF makes it warmer, leaving RAISE/LOWER on
+  brightness. See [Color temperature holds](#color-temperature-holds).
 - **A `2BRL` Pico type** — the four-button raise/lower Pico (PJ2-2BRL,
   `Pico2ButtonRaiseLower`) is supported as a `3BRL` without the STOP button,
   instead of being left out of the device picker.
@@ -323,6 +326,7 @@ step of setup (or editing), pre-filled with these defaults:
 | `light_transition_on`    | Light                |            `0` | `0–300` seconds                       |
 | `light_transition_off`   | Light                |            `0` | `0–300` seconds                       |
 | `light_on_off_toggle`    | Light                |        `false` | Boolean                               |
+| `light_hold_color_temp`  | Light (2BRL, 3BRL)   |        `false` | Boolean                               |
 | `accent_lights`          | Light (P2B, 2B, 3BRL) |          `[]` | Entity list                           |
 | `accent_light_presets`   | Light (P2B, 2B, 3BRL) | one default preset | List of presets (see below); cycled through on repeated OFF taps |
 | `light_presets`          | Light (3BRL only)    |            `[]` | List of presets (see below); cycled through on every STOP press when non-empty |
@@ -506,6 +510,31 @@ either button to work correctly regardless of which state it's currently in
 - Off by default — existing Picos are unaffected until you turn it on.
 - Ignored for a P2B/2B in dual-light mode (see above) — `accent_lights`
   already gives ON and OFF distinct, unambiguous meanings.
+
+### Color temperature holds
+
+Enabling `light_hold_color_temp` (a checkbox on the light options screen,
+2BRL and 3BRL only) turns ON and OFF holds into a white-temperature dial,
+while RAISE and LOWER keep adjusting brightness:
+
+| Gesture  | Action |
+| -------- | ------ |
+| ON tap   | Turn on, as usual — resolved when you let go, to rule out a hold |
+| ON hold  | Ramp cooler until released or at the light's coolest; turns the light on first if it's off |
+| OFF tap  | Turn off, as usual — resolved when you let go |
+| OFF hold | Ramp warmer until released or at the light's warmest; does nothing while the light is off |
+
+- Each step moves `light_step_pct` of the light's supported color
+  temperature range, every `step_time_ms` — the same pace as a brightness
+  ramp. A light showing a color rather than a white starts from the middle
+  of its range.
+- Taking over ON and OFF holds means those buttons can't also run custom
+  `on_hold`/`off_hold` or `on_double_tap`/`off_double_tap` actions, and it
+  can't be combined with `accent_lights`; the options flow says so rather
+  than saving a conflict. STOP's own actions on a 3BRL are unaffected.
+- P2B and 2B don't offer it: their ON/OFF holds already ramp brightness,
+  since they have no RAISE/LOWER.
+- A light that doesn't report a color temperature range ignores the holds.
 
 ---
 

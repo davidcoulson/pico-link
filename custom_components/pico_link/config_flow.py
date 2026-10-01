@@ -30,6 +30,15 @@ _LOGGER = logging.getLogger(__name__)
 # (4B has its own scene-button steps instead).
 CUSTOM_ACTION_PICO_TYPES = frozenset({"P2B", "2B", "2BRL", "3BRL"})
 
+# Custom ON/OFF actions that light_hold_color_temp rules out, since it
+# takes over both buttons' holds (and resolves their taps itself).
+ON_OFF_GESTURE_ACTION_FIELDS = (
+    "on_hold",
+    "off_hold",
+    "on_double_tap",
+    "off_double_tap",
+)
+
 
 async def _run_test_action(
     hass: Any,
@@ -154,6 +163,8 @@ def _chosen_domain(
 def _options_schema(
     domain: str,
     current: dict[str, Any] | None = None,
+    *,
+    pico_type: str | None = None,
 ) -> vol.Schema:
     current = current or {}
     fields: dict[Any, Any] = {}
@@ -281,6 +292,18 @@ def _options_schema(
                 ),
             )
         ] = selector.BooleanSelector()
+
+        # P2B/2B already ramp brightness from ON/OFF holds.
+        if pico_type in RAISE_LOWER_PICO_TYPES:
+            fields[
+                vol.Optional(
+                    "light_hold_color_temp",
+                    default=current.get(
+                        "light_hold_color_temp",
+                        False,
+                    ),
+                )
+            ] = selector.BooleanSelector()
 
     elif domain == "media_player":
         fields[
@@ -725,6 +748,8 @@ def _test_action_field(labels: dict[str, str]) -> selector.SelectSelector:
 def _custom_actions_schema(
     pico_type: str,
     current: dict[str, Any] | None = None,
+    *,
+    on_off_claimed: bool = False,
 ) -> vol.Schema:
     """
     3BRL: the STOP-tap action, plus ON/OFF/STOP hold and double-tap
@@ -734,6 +759,9 @@ def _custom_actions_schema(
 
     A button's hold and double-tap fields are mutually exclusive
     (checked on submit — see PicoLinkOptionsFlow.async_step_custom_actions).
+
+    on_off_claimed (light_hold_color_temp) leaves out every ON/OFF field,
+    since holding those buttons adjusts color temperature instead.
     """
     current = current or {}
 
@@ -750,10 +778,14 @@ def _custom_actions_schema(
         test_labels["middle_button"] = "STOP actions"
 
     if pico_type in RAISE_LOWER_PICO_TYPES:
-        hold_fields = [
-            ("on_hold", "ON hold actions"),
-            ("off_hold", "OFF hold actions"),
-        ]
+        hold_fields = (
+            []
+            if on_off_claimed
+            else [
+                ("on_hold", "ON hold actions"),
+                ("off_hold", "OFF hold actions"),
+            ]
+        )
 
         if pico_type == "3BRL":
             hold_fields.append(("stop_hold", "STOP hold actions"))
@@ -767,10 +799,16 @@ def _custom_actions_schema(
             ] = selector.ActionSelector()
             test_labels[field_name] = label
 
-    for field_name, label in (
-        ("on_double_tap", "ON double-tap actions"),
-        ("off_double_tap", "OFF double-tap actions"),
-    ):
+    double_tap_fields = (
+        ()
+        if on_off_claimed
+        else (
+            ("on_double_tap", "ON double-tap actions"),
+            ("off_double_tap", "OFF double-tap actions"),
+        )
+    )
+
+    for field_name, label in double_tap_fields:
         fields[
             vol.Optional(
                 field_name,
@@ -1218,6 +1256,18 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
         return self._domain
 
+    def _custom_actions_available(self) -> bool:
+        """
+        Whether the custom-actions step has anything to offer this entry.
+
+        Every ON/OFF field disappears when holding those buttons adjusts
+        color temperature, which leaves a 2BRL (no STOP) with nothing.
+        """
+        if self._type not in CUSTOM_ACTION_PICO_TYPES:
+            return False
+
+        return not (self._type == "2BRL" and self._options.get("light_hold_color_temp"))
+
     def _init_menu_options(self) -> list[str]:
         domain = self._current_domain()
         options = ["devices"]
@@ -1228,7 +1278,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         if domain == "light" and self._type in ACCENT_LIGHT_PICO_TYPES:
             options.append("accent_light_quick")
 
-        if self._type in CUSTOM_ACTION_PICO_TYPES:
+        if self._custom_actions_available():
             options.append("custom_actions")
 
         if self._type == "4B":
@@ -1424,32 +1474,47 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            self._options.update(user_input)
+            if user_input.get("light_hold_color_temp"):
+                if self._options.get("accent_lights"):
+                    errors["base"] = "hold_color_temp_accent_light_conflict"
+                elif any(
+                    self._options.get(field_name)
+                    for field_name in ON_OFF_GESTURE_ACTION_FIELDS
+                ):
+                    errors["base"] = "hold_color_temp_custom_actions_conflict"
 
-            if self._quick_edit_section == "options":
+            if not errors:
+                self._options.update(user_input)
+
+                if self._quick_edit_section == "options":
+                    return self._async_finish()
+
+                if self._type in ACCENT_LIGHT_PICO_TYPES and self._domain == "light":
+                    return await self.async_step_accent_light()
+
+                if self._custom_actions_available():
+                    return await self.async_step_custom_actions()
+
                 return self._async_finish()
-
-            if self._type in ACCENT_LIGHT_PICO_TYPES and self._domain == "light":
-                return await self.async_step_accent_light()
-
-            if self._type in CUSTOM_ACTION_PICO_TYPES:
-                return await self.async_step_custom_actions()
-
-            return self._async_finish()
 
         return self.async_show_form(
             step_id="options",
             data_schema=_options_schema(
                 self._domain,
-                current=self._options,
+                current={**self._options, **(user_input or {})},
+                pico_type=self._type,
             ),
+            errors=errors,
             description_placeholders={"domain": self._domain},
             # Mirrors the branching just above: a quick edit always
-            # finishes here; every non-4B type (the only kind that
-            # reaches this step) always continues on to accent_light or
-            # custom_actions otherwise, so this step is never the last
-            # one outside a quick edit.
+            # finishes here, and a non-4B type (the only kind that
+            # reaches this step) otherwise continues on to accent_light
+            # or custom_actions. The one exception -- a 2BRL whose ON/OFF
+            # holds adjust color temperature has no custom actions left,
+            # so it finishes here too -- only mislabels the button.
             last_step=self._quick_edit_section == "options",
         )
 
@@ -1474,6 +1539,9 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
             if overlap:
                 errors["base"] = "accent_light_overlap"
+                current = {**self._options, "accent_lights": accent_lights}
+            elif accent_lights and self._options.get("light_hold_color_temp"):
+                errors["base"] = "hold_color_temp_accent_light_conflict"
                 current = {**self._options, "accent_lights": accent_lights}
             else:
                 self._options["accent_lights"] = accent_lights
@@ -1916,6 +1984,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             data_schema=_custom_actions_schema(
                 self._type,
                 current=self._custom_actions_prefill or self._options,
+                on_off_claimed=bool(self._options.get("light_hold_color_temp")),
             ),
             errors=errors,
             last_step=True,
