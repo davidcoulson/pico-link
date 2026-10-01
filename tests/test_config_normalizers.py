@@ -254,3 +254,35 @@ async def test_parse_light_hold_color_temp_defaults_off():
     assert (
         await parse_pico_config(None, {**base, "light_hold_color_temp": True})
     ).light_hold_color_temp is True
+
+
+def test_validate_light_effects():
+    _config(light_effects=["Candle"]).validate()
+    _config(type="2BRL", light_effects=["Candle"]).validate()
+    # Independent of the ON/OFF color temperature holds.
+    _config(light_effects=["Candle"], light_hold_color_temp=True).validate()
+
+    for pico_type in ("P2B", "2B"):
+        with pytest.raises(ValueError, match="Only 2BRL and 3BRL Picos cycle"):
+            _config(type=pico_type, light_effects=["Candle"]).validate()
+
+    with pytest.raises(ValueError, match="'light_effects' without 'lights'"):
+        _config(lights=[], fans=["fan.a"], light_effects=["Candle"]).validate()
+
+    with pytest.raises(ValueError, match="'accent_lights' and 'light_effects'"):
+        _config(accent_lights=["light.b"], light_effects=["Candle"]).validate()
+
+
+async def test_parse_light_effects_keeps_order_and_drops_blanks_and_repeats():
+    base = {"device_id": "dev", "type": "3BRL", "lights": ["light.a"]}
+
+    assert (await parse_pico_config(None, base)).light_effects == []
+
+    config = await parse_pico_config(
+        None,
+        {**base, "light_effects": [" Solid ", "Candle", "", "Solid", "Aurora"]},
+    )
+    assert config.light_effects == ["Solid", "Candle", "Aurora"]
+
+    with pytest.raises(ValueError, match="entry 2 must be a string"):
+        await parse_pico_config(None, {**base, "light_effects": ["Solid", 3]})

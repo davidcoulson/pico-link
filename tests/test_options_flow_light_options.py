@@ -1,4 +1,4 @@
-"""The options flow's handling of light_hold_color_temp."""
+"""The options flow's handling of light_hold_color_temp and light_effects."""
 
 from __future__ import annotations
 
@@ -134,3 +134,91 @@ async def test_accent_light_refused_once_enabled(hass, enable_custom_integration
     )
 
     assert result["errors"] == {"base": "hold_color_temp_accent_light_conflict"}
+
+
+def _light_with_effects(hass, effects: list[str] | None) -> None:
+    attributes = {"effect_list": effects} if effects is not None else {}
+    hass.states.async_set("light.gym", "on", attributes)
+
+
+async def test_effects_picker_offers_the_lights_own_effects(
+    hass, enable_custom_integrations
+):
+    _light_with_effects(hass, ["Solid", "aurora", "Candle"])
+
+    for pico_type, offered in (("2BRL", True), ("3BRL", True), ("P2B", False)):
+        form, _ = await _timing_and_behavior(hass, _entry(hass, pico_type))
+        schema = form["data_schema"].schema
+
+        assert ("light_effects" in schema) is offered
+
+        if offered:
+            picker = next(v for k, v in schema.items() if k == "light_effects")
+            # Sorted case-insensitively, like the other effect pickers.
+            assert picker.config["options"] == ["aurora", "Candle", "Solid"]
+
+
+async def test_effects_picker_hidden_for_a_light_without_effects(
+    hass, enable_custom_integrations
+):
+    _light_with_effects(hass, None)
+
+    form, _ = await _timing_and_behavior(hass, _entry(hass, "3BRL"))
+
+    assert "light_effects" not in form["data_schema"].schema
+
+
+async def test_effects_save_in_the_order_picked(hass, enable_custom_integrations):
+    _light_with_effects(hass, ["Aurora", "Candle", "Solid"])
+    entry = _entry(hass, "3BRL")
+
+    _, result = await _timing_and_behavior(
+        hass, entry, light_effects=["Solid", "Candle", "Aurora"]
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["light_effects"] == ["Solid", "Candle", "Aurora"]
+
+
+async def test_a_saved_effect_the_light_dropped_stays_selectable(
+    hass, enable_custom_integrations
+):
+    _light_with_effects(hass, ["Aurora", "Solid"])
+    entry = _entry(hass, "3BRL", light_effects=["Solid", "Retired"])
+
+    form, result = await _timing_and_behavior(
+        hass, entry, light_effects=["Solid", "Retired"]
+    )
+
+    picker = next(
+        v for k, v in form["data_schema"].schema.items() if k == "light_effects"
+    )
+    assert "Retired" in picker.config["options"]
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_effects_refused_alongside_an_accent_light(
+    hass, enable_custom_integrations
+):
+    _light_with_effects(hass, ["Aurora", "Solid"])
+    entry = _entry(hass, "3BRL", accent_lights=["light.accent"])
+
+    _, result = await _timing_and_behavior(hass, entry, light_effects=["Solid"])
+
+    assert result["errors"] == {"base": "light_effects_accent_light_conflict"}
+
+
+async def test_accent_light_refused_once_effects_are_set(
+    hass, enable_custom_integrations
+):
+    entry = _entry(hass, "3BRL", light_effects=["Solid"])
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "accent_light_quick"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"accent_lights": ["light.accent"]}
+    )
+
+    assert result["errors"] == {"base": "light_effects_accent_light_conflict"}

@@ -109,10 +109,12 @@
           "light_transition_off": "Off transition",
           "light_on_off_toggle": "ON/OFF buttons toggle the light",
           "light_hold_color_temp": "Hold ON/OFF to adjust color temperature",
+          "light_effects": "RAISE/LOWER tap cycles these effects",
           "media_player_vol_step": "Volume step"
         },
         "data_description": {
-          "light_hold_color_temp": "2BRL and 3BRL only. Hold ON to make the light cooler and OFF to make it warmer, while RAISE/LOWER keep adjusting brightness. Holding ON turns the light on first if it's off. Taps still turn the light on and off, once you let go. ON and OFF can't also run custom hold or double-tap actions, and this can't be combined with an accent light."
+          "light_hold_color_temp": "2BRL and 3BRL only. Hold ON to make the light cooler and OFF to make it warmer, while RAISE/LOWER keep adjusting brightness. Holding ON turns the light on first if it's off. Taps still turn the light on and off, once you let go. ON and OFF can't also run custom hold or double-tap actions, and this can't be combined with an accent light.",
+          "light_effects": "2BRL and 3BRL only. Pick favorites from the light's own effects, in the order you want them. A RAISE tap steps to the next one and a LOWER tap to the previous, wrapping around; holding RAISE/LOWER still ramps brightness. A RAISE tap while the light is off turns it on with the next effect. Leave empty to keep RAISE/LOWER taps on brightness. Can't be combined with an accent light."
         }
       },
       "accent_light": {
@@ -229,7 +231,8 @@
       "middle_button_light_presets_conflict": "STOP actions can't be combined with the light-preset cycling configured on the previous step — clear one or the other before continuing.",
       "middle_button_accent_light_conflict": "On a 3BRL, STOP switches to the accent light in dual-light mode, so it can't also run STOP actions — clear the STOP actions, or remove the accent light.",
       "hold_color_temp_accent_light_conflict": "Holding ON/OFF to adjust color temperature can't be combined with an accent light (dual-light mode) — turn one of them off before continuing.",
-      "hold_color_temp_custom_actions_conflict": "Holding ON/OFF to adjust color temperature needs the ON and OFF buttons to itself — clear their hold and double-tap actions under Custom actions first, then turn this on."
+      "hold_color_temp_custom_actions_conflict": "Holding ON/OFF to adjust color temperature needs the ON and OFF buttons to itself — clear their hold and double-tap actions under Custom actions first, then turn this on.",
+      "light_effects_accent_light_conflict": "RAISE/LOWER effect cycling can't be combined with an accent light — in dual-light mode RAISE/LOWER already cycle the accent light's effects. Clear one of them before continuing."
     }
   },
   "issues": {

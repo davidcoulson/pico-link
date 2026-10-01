@@ -20,6 +20,11 @@ TapAction = Callable[[], None]
 # persisted per config entry so STOP returns to it after a restart.
 ACCENT_EFFECT_MEMORY_KEY = "accent_effect"
 
+# light_effects: the effect last picked with RAISE/LOWER, persisted per
+# config entry so a tap after the light was off (or after a restart)
+# carries on from it instead of starting over.
+LIGHT_EFFECT_MEMORY_KEY = "light_effect"
+
 # 3BRL dual-light mode: which light the entry's Picos last selected
 # (True = accent, False = center/off) and when. Runtime only.
 SELECTION_KEY = "accent_selected"
@@ -85,6 +90,13 @@ class LightActions:
         OFF hold    -> ramp color temperature warmer; no-op while off
         RAISE/LOWER and STOP are unchanged. Each step moves
         light_step_pct of the light's color temperature range.
+
+    2BRL / 3BRL with light_effects:
+        RAISE tap   -> next effect in light_effects, wrapping around;
+                       turns the light on with it if it's off
+        LOWER tap   -> previous effect; no-op while off
+        RAISE/LOWER hold -> ramp brightness, as above
+        Taps resolve on release, so a hold can be told apart.
     """
 
     MAX_RAMP_STEPS = 50
@@ -124,6 +136,11 @@ class LightActions:
         self._target_kelvin: Optional[int] = None
         self._kelvin_updated_at = 0.0
 
+        # light_effects: the most recently requested effect, so rapid
+        # RAISE/LOWER taps step from what was asked for, not lagging state.
+        self._target_light_effect: Optional[str] = None
+        self._light_effect_updated_at = 0.0
+
     # =============================================================
     # PROFILE HELPERS
     # =============================================================
@@ -135,6 +152,10 @@ class LightActions:
     def _hold_adjusts_color_temp(self) -> bool:
         """Return True when holding ON/OFF ramps color temperature (2BRL/3BRL)."""
         return self.ctrl.conf.light_hold_color_temp
+
+    def _raise_lower_cycles_effects(self) -> bool:
+        """Return True when a RAISE/LOWER tap steps effects (light_effects)."""
+        return bool(self.ctrl.conf.light_effects)
 
     def _resolves_on_off_on_release(self) -> bool:
         """Return True when an ON/OFF tap waits for release to rule out a hold."""
@@ -914,10 +935,13 @@ class LightActions:
 
         generation = self._begin_gesture(button)
 
-        self._schedule_brightness_step(
-            direction,
-            task_name=f"light-{button}-step",
-        )
+        # With light_effects a tap steps effects instead, which can only
+        # be told apart from a hold once the button is released.
+        if not self._raise_lower_cycles_effects():
+            self._schedule_brightness_step(
+                direction,
+                task_name=f"light-{button}-step",
+            )
 
         self._arm_hold(
             button,
@@ -931,7 +955,13 @@ class LightActions:
         if self._active_button != button:
             return
 
-        self._clear_gesture()
+        was_holding = self._clear_gesture()
+
+        if self._raise_lower_cycles_effects() and not was_holding:
+            self._schedule_light_effect_step(
+                1 if button == "raise" else -1,
+                task_name=f"light-{button}-effect",
+            )
 
     # =============================================================
     # HOLD / RAMP LIFECYCLE
@@ -1093,6 +1123,114 @@ class LightActions:
             "turn_on",
             {"brightness_pct": percentage},
             domain="light",
+        )
+
+    # =============================================================
+    # RAISE/LOWER EFFECT CYCLING (light_effects)
+    # =============================================================
+
+    def _light_effect_cycle(self) -> list[str]:
+        """
+        Return the configured effects the light currently offers, in order.
+
+        A favorite the light no longer lists (renamed by a firmware
+        update, say) is skipped rather than sent. If the light can't
+        report its effects right now (unavailable while it reboots),
+        the whole configured list is tried as-is.
+        """
+        favorites = self.ctrl.conf.light_effects
+        state = self.ctrl.utils.get_entity_state()
+        offered = state.attributes.get("effect_list") if state else None
+
+        if not offered:
+            return list(favorites)
+
+        return [effect for effect in favorites if effect in offered]
+
+    def _current_light_effect(self) -> Optional[str]:
+        """
+        Return the effect the next RAISE/LOWER tap should step from.
+
+        A recent request wins, like the brightness target; then whatever
+        the light reports while it's on; then the last effect picked
+        here, so a tap after the light was off carries on from it.
+        """
+        if (
+            self._target_light_effect is not None
+            and time.monotonic() - self._light_effect_updated_at
+            <= self.TARGET_CACHE_SECONDS
+        ):
+            return self._target_light_effect
+
+        state = self.ctrl.utils.get_entity_state()
+
+        if state and state.state == "on":
+            effect = state.attributes.get("effect")
+
+            if effect:
+                return effect
+
+        return self.ctrl.memory.get(LIGHT_EFFECT_MEMORY_KEY)
+
+    def _schedule_light_effect_step(
+        self,
+        direction: int,
+        *,
+        task_name: str,
+    ) -> None:
+        """
+        Step `lights` to the next/previous configured effect, wrapping around.
+
+        RAISE on a light that's off turns it on at light_on_pct with the
+        next effect; LOWER leaves a light that's off alone, the same as a
+        LOWER brightness step.
+        """
+        effects = self._light_effect_cycle()
+
+        if not effects:
+            _LOGGER.debug(
+                "Device %s: %s offers none of the configured light_effects",
+                self.ctrl.conf.device_id,
+                self.ctrl.utils.primary_entity("light"),
+            )
+            return
+
+        brightness = self._brightness_for_step()
+
+        if brightness is None:
+            return
+
+        if brightness == 0 and direction < 0:
+            return
+
+        current = self._current_light_effect()
+
+        if current in effects:
+            index = (effects.index(current) + direction) % len(effects)
+        else:
+            index = 0 if direction > 0 else len(effects) - 1
+
+        effect = effects[index]
+        self._target_light_effect = effect
+        self._light_effect_updated_at = time.monotonic()
+        self.ctrl.memory.set(LIGHT_EFFECT_MEMORY_KEY, effect)
+
+        data: dict[str, Any] = {"effect": effect}
+
+        if brightness == 0:
+            percentage = self.ctrl.conf.light_on_pct
+            self._set_brightness_target(percentage)
+            self._light_preset_index = None
+            data["brightness_pct"] = percentage
+            data.update(self._transition_data(turning_on=True))
+
+        self.ctrl.create_task(
+            self.ctrl.utils.call_service(
+                "turn_on",
+                data,
+                domain="light",
+            ),
+            task_name,
         )
 
     # =============================================================
@@ -1269,3 +1407,5 @@ class LightActions:
         self._target_effect = None
         self._effect_updated_at = 0.0
         self._clear_color_temp_target()
+        self._target_light_effect = None
+        self._light_effect_updated_at = 0.0

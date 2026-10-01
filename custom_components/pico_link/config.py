@@ -82,6 +82,13 @@ class PicoConfig:
     # run custom hold or double-tap actions (see validate()).
     light_hold_color_temp: bool = False
 
+    # 2BRL and 3BRL only, and only outside dual-light mode (which
+    # already gives RAISE/LOWER to the accent light's effects). A
+    # non-empty list makes a RAISE/LOWER tap step `lights` to the
+    # next/previous of these effects, in this order, wrapping around;
+    # holding RAISE/LOWER still ramps brightness.
+    light_effects: list[str] = field(default_factory=list)
+
     # A non-empty accent_lights list puts the Pico into dual-light
     # mode: ON switches to the center light(s) in `lights`. On P2B/2B,
     # OFF switches to these accent light(s), cycling through
@@ -317,6 +324,26 @@ class PicoConfig:
                     "can't also run custom hold or double-tap actions."
                 )
 
+        if self.light_effects:
+            if self.type not in RAISE_LOWER_PICO_TYPES:
+                raise ValueError(
+                    f"Pico {self.device_id} ({self.type}) cannot define "
+                    "'light_effects'. Only 2BRL and 3BRL Picos cycle "
+                    "effects from RAISE/LOWER."
+                )
+
+            if not self.lights:
+                raise ValueError(
+                    f"Pico {self.device_id} defines 'light_effects' without 'lights'."
+                )
+
+            if self.accent_lights:
+                raise ValueError(
+                    f"Pico {self.device_id} defines both 'accent_lights' "
+                    "and 'light_effects'. In dual-light mode RAISE/LOWER "
+                    "already cycle the accent light's effects."
+                )
+
         for button, hold_actions, double_tap_actions in (
             ("on", self.on_hold, self.on_double_tap),
             ("off", self.off_hold, self.off_double_tap),
@@ -548,6 +575,38 @@ def _normalize_light_preset(value: Any) -> "AccentPreset":
             max_val=100,
         ),
     )
+
+
+def _normalize_effect_names(value: Any) -> list[str]:
+    """
+    Normalize light_effects to a list of distinct, non-empty effect names.
+
+    Order is kept, since it's the order RAISE steps through them.
+    """
+    if value is None:
+        return []
+
+    if isinstance(value, str):
+        value = [value]
+
+    if not isinstance(value, list):
+        raise ValueError("'light_effects' must be a list of effect names.")
+
+    effects: list[str] = []
+
+    for index, item in enumerate(value, start=1):
+        if not isinstance(item, str):
+            raise ValueError(
+                f"'light_effects' entry {index} must be a string, "
+                f"got {type(item).__name__}."
+            )
+
+        effect = item.strip()
+
+        if effect and effect not in effects:
+            effects.append(effect)
+
+    return effects
 
 
 def _normalize_light_presets(value: Any) -> list["AccentPreset"]:
@@ -1020,6 +1079,10 @@ async def parse_pico_config(
         default=False,
     )
 
+    light_effects = _normalize_effect_names(
+        merged.get("light_effects"),
+    )
+
     accent_light_presets = _normalize_accent_presets(
         merged.get("accent_light_presets"),
     )
@@ -1160,6 +1223,7 @@ async def parse_pico_config(
         light_transition_off=light_transition_off,
         light_on_off_toggle=light_on_off_toggle,
         light_hold_color_temp=light_hold_color_temp,
+        light_effects=light_effects,
         accent_light_presets=accent_light_presets,
         light_presets=light_presets,
         media_player_vol_step=media_player_vol_step,

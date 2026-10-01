@@ -36,6 +36,9 @@
 - **Color temperature from ON/OFF holds (2BRL, 3BRL)** — holding ON makes a
   light cooler and holding OFF makes it warmer, leaving RAISE/LOWER on
   brightness. See [Color temperature holds](#color-temperature-holds).
+- **Effect cycling from RAISE/LOWER (2BRL, 3BRL)** — a RAISE or LOWER tap
+  steps a light through a list of favorite effects, while holding still
+  ramps brightness. See [Effect cycling](#effect-cycling).
 - **A `2BRL` Pico type** — the four-button raise/lower Pico (PJ2-2BRL,
   `Pico2ButtonRaiseLower`) is supported as a `3BRL` without the STOP button,
   instead of being left out of the device picker.
@@ -327,6 +330,7 @@ step of setup (or editing), pre-filled with these defaults:
 | `light_transition_off`   | Light                |            `0` | `0–300` seconds                       |
 | `light_on_off_toggle`    | Light                |        `false` | Boolean                               |
 | `light_hold_color_temp`  | Light (2BRL, 3BRL)   |        `false` | Boolean                               |
+| `light_effects`          | Light (2BRL, 3BRL)   |          `[]` | Effect names, picked from the light's own effects; offered only for a light that has effects |
 | `accent_lights`          | Light (P2B, 2B, 3BRL) |          `[]` | Entity list                           |
 | `accent_light_presets`   | Light (P2B, 2B, 3BRL) | one default preset | List of presets (see below); cycled through on repeated OFF taps |
 | `light_presets`          | Light (3BRL only)    |            `[]` | List of presets (see below); cycled through on every STOP press when non-empty |
@@ -535,6 +539,31 @@ while RAISE and LOWER keep adjusting brightness:
 - P2B and 2B don't offer it: their ON/OFF holds already ramp brightness,
   since they have no RAISE/LOWER.
 - A light that doesn't report a color temperature range ignores the holds.
+
+### Effect cycling
+
+Picking favorites in `light_effects` (on the light options screen, 2BRL
+and 3BRL only, for a light that has effects) moves RAISE/LOWER taps from
+brightness to those effects, in the order picked:
+
+| Gesture     | Action |
+| ----------- | ------ |
+| RAISE tap   | Next favorite, wrapping to the first after the last; turns the light on at `light_on_pct` with it if it's off |
+| LOWER tap   | Previous favorite, wrapping to the last; does nothing while the light is off |
+| RAISE/LOWER hold | Ramp brightness, unchanged |
+
+- Taps resolve when the button is released, so a hold can be told apart.
+- Stepping starts from the light's current effect. An effect that isn't one
+  of the favorites starts RAISE at the first and LOWER at the last. After
+  the light was off, the next RAISE carries on from the last effect picked,
+  which is remembered across restarts and shared by every Pico in the entry.
+- A favorite the light stops offering (renamed by a firmware update, say)
+  is skipped rather than sent, and stays selectable in the options screen
+  so it can be removed.
+- Can't be combined with `accent_lights`: in dual-light mode RAISE/LOWER
+  already cycle the accent light's effects.
+- Independent of [color temperature holds](#color-temperature-holds); a
+  Pico can use both.
 
 ---
 

@@ -165,6 +165,7 @@ def _options_schema(
     current: dict[str, Any] | None = None,
     *,
     pico_type: str | None = None,
+    effect_options: list[str] | None = None,
 ) -> vol.Schema:
     current = current or {}
     fields: dict[Any, Any] = {}
@@ -304,6 +305,27 @@ def _options_schema(
                     ),
                 )
             ] = selector.BooleanSelector()
+
+            # Offered only for a light that has effects. A saved favorite
+            # the light no longer lists stays selectable, so the form
+            # doesn't reject its own saved value.
+            saved_effects = list(current.get("light_effects", []))
+            offered = list(effect_options or [])
+            choices = offered + [e for e in saved_effects if e not in offered]
+
+            if choices:
+                fields[
+                    vol.Optional(
+                        "light_effects",
+                        default=saved_effects,
+                    )
+                ] = selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=choices,
+                        multiple=True,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                )
 
     elif domain == "media_player":
         fields[
@@ -1486,6 +1508,9 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 ):
                     errors["base"] = "hold_color_temp_custom_actions_conflict"
 
+            if user_input.get("light_effects") and self._options.get("accent_lights"):
+                errors["base"] = "light_effects_accent_light_conflict"
+
             if not errors:
                 self._options.update(user_input)
 
@@ -1506,6 +1531,9 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 self._domain,
                 current={**self._options, **(user_input or {})},
                 pico_type=self._type,
+                effect_options=(
+                    self._light_effect_options() if self._domain == "light" else None
+                ),
             ),
             errors=errors,
             description_placeholders={"domain": self._domain},
@@ -1542,6 +1570,9 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 current = {**self._options, "accent_lights": accent_lights}
             elif accent_lights and self._options.get("light_hold_color_temp"):
                 errors["base"] = "hold_color_temp_accent_light_conflict"
+                current = {**self._options, "accent_lights": accent_lights}
+            elif accent_lights and self._options.get("light_effects"):
+                errors["base"] = "light_effects_accent_light_conflict"
                 current = {**self._options, "accent_lights": accent_lights}
             else:
                 self._options["accent_lights"] = accent_lights
