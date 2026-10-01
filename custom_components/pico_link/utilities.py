@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Optional, cast
 
 from homeassistant.core import Context, HomeAssistant
-from homeassistant.helpers.script import Script
+from homeassistant.helpers.script import DATA_SCRIPTS, Script
 
 from .const import DOMAIN
 
@@ -12,6 +12,42 @@ if TYPE_CHECKING:
     from .controller import PicoController
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def _async_release_script(hass: HomeAssistant, script: Script) -> None:
+    """
+    Drop a finished Script from Home Assistant's script registry.
+
+    Every top-level Script registers itself in hass.data["helpers.script"]
+    on construction, so shutdown can stop whatever is still running.
+    Nothing removes it again, and a Pico builds one of these per press,
+    so without this the registry grows for as long as Home Assistant runs.
+
+    Home Assistant 2026.9 added Script.async_unload, which stops the
+    script and deregisters it; prefer it where it exists. Older versions
+    leave the registry to us, and it changed shape along the way: a list
+    of {"instance": ...} entries before 2026.9, a dict keyed by
+    id(script) from then on.
+    """
+    unload = getattr(script, "async_unload", None)
+
+    if unload is not None:
+        await unload()
+        return
+
+    await script.async_stop()
+
+    registered = hass.data.get(DATA_SCRIPTS)
+
+    if not registered:
+        return
+
+    if isinstance(registered, dict):
+        registered.pop(id(script), None)
+        return
+
+    registered[:] = [item for item in registered if item["instance"] is not script]
+
 
 # Single source of truth for the relationship between a Home Assistant
 # domain and the corresponding PicoConfig entity-list field.
@@ -190,3 +226,5 @@ class SharedUtils:
                 "Device %s: error running configured action sequence",
                 self.conf.device_id,
             )
+        finally:
+            await _async_release_script(self.hass, script)
