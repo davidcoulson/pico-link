@@ -18,17 +18,35 @@ async def async_release_script(hass: HomeAssistant, script: Script) -> None:
     """
     Stop a Script and drop it from Home Assistant's script registry.
 
-    Every top-level Script appends itself to hass.data["helpers.script"]
-    on construction (so shutdown can stop running scripts) and nothing
-    in Home Assistant ever removes it, so a Script that is done for good
-    has to be taken out here or it lives for the rest of the process.
+    Every top-level Script registers itself in hass.data["helpers.script"]
+    on construction (so shutdown can stop running scripts), so a Script
+    that is done for good has to be taken out or it lives for the rest of
+    the process.
+
+    Home Assistant 2026.9 added Script.async_unload, which stops the
+    script and deregisters it; prefer it where it exists. Older versions
+    leave the registry to us, and it changed shape along the way: a list
+    of {"instance": ...} entries before 2026.9, a dict keyed by
+    id(script) from then on.
     """
+    unload = getattr(script, "async_unload", None)
+
+    if unload is not None:
+        await unload()
+        return
+
     await script.async_stop()
 
     registered = hass.data.get(DATA_SCRIPTS)
 
-    if registered:
-        registered[:] = [item for item in registered if item["instance"] is not script]
+    if not registered:
+        return
+
+    if isinstance(registered, dict):
+        registered.pop(id(script), None)
+        return
+
+    registered[:] = [item for item in registered if item["instance"] is not script]
 
 
 class SharedUtils:
