@@ -19,11 +19,16 @@ from .const import (
     DOMAIN,
     DOMAIN_ENTITY_FIELDS,
     PICO_TYPE_MAP,
+    RAISE_LOWER_PICO_TYPES,
     SCENE_BUTTONS,
 )
 from .utilities import async_release_script
 
 _LOGGER = logging.getLogger(__name__)
+
+# Types offered the custom-actions step: every type with ON/OFF buttons
+# (4B has its own scene-button steps instead).
+CUSTOM_ACTION_PICO_TYPES = frozenset({"P2B", "2B", "2BRL", "3BRL"})
 
 
 async def _run_test_action(
@@ -723,8 +728,9 @@ def _custom_actions_schema(
 ) -> vol.Schema:
     """
     3BRL: the STOP-tap action, plus ON/OFF/STOP hold and double-tap
-    actions. P2B/2B: just ON/OFF double-tap actions (they have no STOP
-    button, and hold is already their built-in tap-vs-hold gesture).
+    actions. 2BRL: the same minus everything STOP (it has no STOP
+    button). P2B/2B: just ON/OFF double-tap actions, since hold is
+    already their built-in tap-vs-hold gesture.
 
     A button's hold and double-tap fields are mutually exclusive
     (checked on submit — see PicoLinkOptionsFlow.async_step_custom_actions).
@@ -743,11 +749,16 @@ def _custom_actions_schema(
         ] = selector.ActionSelector()
         test_labels["middle_button"] = "STOP actions"
 
-        for field_name, label in (
+    if pico_type in RAISE_LOWER_PICO_TYPES:
+        hold_fields = [
             ("on_hold", "ON hold actions"),
             ("off_hold", "OFF hold actions"),
-            ("stop_hold", "STOP hold actions"),
-        ):
+        ]
+
+        if pico_type == "3BRL":
+            hold_fields.append(("stop_hold", "STOP hold actions"))
+
+        for field_name, label in hold_fields:
             fields[
                 vol.Optional(
                     field_name,
@@ -1217,7 +1228,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         if domain == "light" and self._type in ACCENT_LIGHT_PICO_TYPES:
             options.append("accent_light_quick")
 
-        if self._type in ("3BRL", "P2B", "2B"):
+        if self._type in CUSTOM_ACTION_PICO_TYPES:
             options.append("custom_actions")
 
         if self._type == "4B":
@@ -1422,7 +1433,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             if self._type in ACCENT_LIGHT_PICO_TYPES and self._domain == "light":
                 return await self.async_step_accent_light()
 
-            if self._type in ("3BRL", "P2B", "2B"):
+            if self._type in CUSTOM_ACTION_PICO_TYPES:
                 return await self.async_step_custom_actions()
 
             return self._async_finish()
@@ -1544,7 +1555,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             self._options["accent_light_presets"] = self._accent_presets
 
             if (
-                self._type in ("3BRL", "P2B", "2B")
+                self._type in CUSTOM_ACTION_PICO_TYPES
                 and self._quick_edit_section != "accent_light"
             ):
                 return await self.async_step_custom_actions()

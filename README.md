@@ -33,6 +33,9 @@
   [Dual-light mode](#dual-light-mode).
 - **Light on/off toggle option** — ON and OFF can each independently toggle
   a light's state instead of always issuing a discrete turn-on/turn-off.
+- **A `2BRL` Pico type** — the four-button raise/lower Pico (PJ2-2BRL,
+  `Pico2ButtonRaiseLower`) is supported as a `3BRL` without the STOP button,
+  instead of being left out of the device picker.
 - **Hold and double-tap actions (3BRL, 4B), double-tap actions (P2B, 2B)** —
   ON, OFF, and STOP on a 3BRL, or any button on a 4B, can each run a custom
   action sequence when held (in addition to their normal tap behavior) or on
@@ -140,6 +143,7 @@ loaded after it.
 | ------ | -------------------------------- | ------------------------------------------ | -------------------------------------------------------- |
 | `P2B`  | Paddle Pico                     | `on`, `off`                               | Domain-specific ON/OFF tap and hold behavior           |
 | `2B`   | Two-button Pico                 | `on`, `off`                               | Domain-specific ON/OFF tap and hold behavior           |
+| `2BRL` | On / Raise / Lower / Off        | `on`, `raise`, `lower`, `off`             | Like `3BRL` without the STOP button                    |
 | `3BRL` | On / Raise / Stop / Lower / Off | `on`, `raise`, `stop`, `lower`, `off`     | Full domain control with dedicated raise/lower buttons |
 | `4B`   | Four-button scene Pico          | `button_1`, `button_2`, `button_3`, `off` | Ordered custom actions only                            |
 
@@ -674,14 +678,16 @@ To use the domain default, leave STOP actions empty on that step.
 ### Custom actions
 
 On the **Custom actions** step, `3BRL` gets ON, OFF, and STOP fields, while
-`P2B` and `2B` (which have no STOP button) get just ON and OFF. Filling in
+`2BRL`, `P2B` and `2B` (which have no STOP button) get just ON and OFF —
+with hold fields for `2BRL` and double-tap only for `P2B`/`2B`. Filling in
 both a hold and a double-tap field for one button (3BRL only — see below)
 is caught right on this step (an inline error naming the conflict), not
 deferred to a later **Setup failed**. Leave a button's fields empty to skip
 it entirely; with nothing configured, no timer is created and there's no
 behavior change at all.
 
-- **Hold** (`on_hold` / `off_hold` / `stop_hold`, `3BRL` only) — runs once
+- **Hold** (`on_hold` / `off_hold`, `3BRL` and `2BRL`; `stop_hold`, `3BRL`
+  only) — runs once
   that button has been held past `hold_time_ms`, in addition to its normal
   tap/press behavior (including custom STOP actions), which always still
   fires immediately on press, unchanged. This is how you can, for example,

@@ -174,3 +174,44 @@ async def test_parse_pico_config_without_custom_actions_needs_no_hass():
     assert config.light_on_off_toggle is False
     assert config.accent_light_presets[0].rgb_color == [1, 2, 3]
     assert config.middle_button == []
+
+
+async def test_parse_2brl_allows_onoff_actions_but_not_stop(hass):
+    """2BRL is a 3BRL without STOP: ON/OFF actions yes, STOP fields no."""
+    config = await parse_pico_config(
+        hass,
+        {
+            "device_id": "dev",
+            "type": "2BRL",
+            "lights": ["light.a"],
+            "on_hold": [{"action": "light.turn_on", "target": {"entity_id": "lights"}}],
+            "off_double_tap": [{"action": "light.turn_off"}],
+        },
+    )
+
+    assert config.type == "2BRL"
+    assert config.on_hold[0]["target"]["entity_id"] == ["light.a"]
+    assert config.off_double_tap
+    config.validate()
+
+    for field_name in ("middle_button", "stop_hold", "stop_double_tap"):
+        with pytest.raises(ValueError, match=f"'{field_name}' is only valid"):
+            await parse_pico_config(
+                hass,
+                {
+                    "device_id": "dev",
+                    "type": "2BRL",
+                    "lights": ["light.a"],
+                    field_name: [{"action": "light.turn_on"}],
+                },
+            )
+
+
+def test_validate_2brl_rejects_stop_only_features():
+    _config(type="2BRL").validate()
+
+    with pytest.raises(ValueError, match="Only 3BRL"):
+        _config(type="2BRL", light_presets=[object()]).validate()
+
+    with pytest.raises(ValueError, match="Only P2B, 2B, and 3BRL"):
+        _config(type="2BRL", accent_lights=["light.b"]).validate()

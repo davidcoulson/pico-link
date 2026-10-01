@@ -40,11 +40,13 @@ class Pico3ButtonRaiseLower(HoldDoubleTapGestures):
         "stop": "press_stop",
     }
 
+    _LOG_NAME = "3BRL"
+
     def __init__(self, controller: "PicoController") -> None:
         super().__init__(controller)
 
     def _task_prefix(self) -> str:
-        return "3brl"
+        return self._LOG_NAME.lower()
 
     def _hold_actions_for(self, button: str) -> list[dict[str, Any]]:
         return getattr(self._ctrl.conf, self._HOLD_ACTION_FIELDS[button])
@@ -55,12 +57,12 @@ class Pico3ButtonRaiseLower(HoldDoubleTapGestures):
     def _actions(self):
         domain = self._ctrl.utils.entity_domain()
         if not domain:
-            _LOGGER.debug("3BRL: no domain configured")
+            _LOGGER.debug("%s: no domain configured", self._LOG_NAME)
             return None
 
         actions = self._ctrl.actions.get(domain)
         if not actions:
-            _LOGGER.debug("3BRL: no action handler for domain %s", domain)
+            _LOGGER.debug("%s: no action handler for domain %s", self._LOG_NAME, domain)
             return None
 
         return actions
@@ -73,18 +75,20 @@ class Pico3ButtonRaiseLower(HoldDoubleTapGestures):
         if not actions:
             return
 
+        if button in self._TAP_METHODS:
+            self._handle_gesture_press(
+                button,
+                getattr(actions, self._TAP_METHODS[button]),
+            )
+            return
+
         match button:
-            case "on" | "off" | "stop":
-                self._handle_gesture_press(
-                    button,
-                    getattr(actions, self._TAP_METHODS[button]),
-                )
             case "raise":
                 actions.press_raise()
             case "lower":
                 actions.press_lower()
             case _:
-                _LOGGER.debug("3BRL: unknown press button '%s'", button)
+                _LOGGER.debug("%s: unknown press button '%s'", self._LOG_NAME, button)
 
     # -------------------------------------------------------------
     # RELEASE
@@ -94,15 +98,17 @@ class Pico3ButtonRaiseLower(HoldDoubleTapGestures):
         if not actions:
             return
 
+        if button in self._TAP_METHODS:
+            self._handle_gesture_release(
+                button,
+                getattr(actions, self._TAP_METHODS[button]),
+            )
+            return
+
         match button:
             case "raise":
                 actions.release_raise()
             case "lower":
                 actions.release_lower()
-            case "on" | "off" | "stop":
-                self._handle_gesture_release(
-                    button,
-                    getattr(actions, self._TAP_METHODS[button]),
-                )
             case _:
                 pass

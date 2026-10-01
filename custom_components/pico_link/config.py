@@ -89,7 +89,8 @@ class PicoConfig:
     # Media-player configuration.
     media_player_vol_step: int = 10
 
-    # 3BRL only. The button's normal tap/press behavior always still
+    # 3BRL and 2BRL (middle_button/stop_hold are 3BRL-only, since only
+    # a 3BRL has a STOP button). The button's normal tap/press behavior always still
     # runs immediately; these additionally run when that button is
     # held past hold_time_ms.
     middle_button: list[ActionConfig] = field(default_factory=list)
@@ -97,8 +98,8 @@ class PicoConfig:
     off_hold: list[ActionConfig] = field(default_factory=list)
     stop_hold: list[ActionConfig] = field(default_factory=list)
 
-    # 3BRL, P2B, and 2B (ON/OFF only -- STOP is 3BRL-only, since P2B
-    # and 2B have no STOP button). A button's tap defers to see whether
+    # Every type with ON/OFF buttons (STOP is 3BRL-only). A button's
+    # tap defers to see whether
     # a second tap follows within DOUBLE_TAP_WINDOW_MS: two taps run
     # this instead of the tap firing twice. On 3BRL a button cannot
     # define both this and its *_hold action (see validate()); on
@@ -598,9 +599,16 @@ async def _validate_actions(
         raise ValueError(f"{context}: {err}") from err
 
 
-_PICO_TYPE_DISPLAY_ORDER = ("P2B", "2B", "3BRL", "4B")
+_PICO_TYPE_DISPLAY_ORDER = ("P2B", "2B", "2BRL", "3BRL", "4B")
 
 _3BRL_ONLY: frozenset[str] = frozenset({"3BRL"})
+
+# ON/OFF hold actions: the types whose ON/OFF are plain taps (RAISE and
+# LOWER do the ramping), so a hold is free to run something custom.
+_RAISE_LOWER_TYPES: frozenset[str] = frozenset({"2BRL", "3BRL"})
+
+# ON/OFF double-tap actions: every type with an ON and an OFF button.
+_ON_OFF_ACTION_TYPES: frozenset[str] = frozenset({"P2B", "2B", "2BRL", "3BRL"})
 
 
 async def _validate_gated_action_field(
@@ -616,10 +624,10 @@ async def _validate_gated_action_field(
     Validate one optional custom action field restricted to specific
     Pico types.
 
-    Used for middle_button and on_hold/off_hold/stop_hold (3BRL-only:
-    STOP tap, and ON/OFF/STOP hold), and for on_double_tap/
-    off_double_tap (3BRL, P2B, and 2B ON/OFF double-tap -- STOP has no
-    P2B/2B equivalent, so stop_double_tap stays 3BRL-only too). Entity
+    Used for middle_button and stop_hold (3BRL-only, since only a 3BRL
+    has a STOP button), for on_hold/off_hold (3BRL and 2BRL, whose
+    ON/OFF are plain taps), and for on_double_tap/off_double_tap (every
+    type with ON and OFF buttons). Entity
     placeholders (e.g. "lights") are expanded the same way as any other
     custom action field.
     """
@@ -970,8 +978,8 @@ async def parse_pico_config(
     )
 
     # ------------------------------------------------------------
-    # CUSTOM ACTIONS: 3BRL STOP TAP AND ON/OFF/STOP HOLD, PLUS
-    # ON/OFF DOUBLE-TAP (3BRL, P2B, 2B)
+    # CUSTOM ACTIONS: 3BRL STOP TAP AND STOP HOLD, ON/OFF HOLD
+    # (3BRL, 2BRL), AND ON/OFF DOUBLE-TAP (all ON/OFF types)
     # ------------------------------------------------------------
 
     placeholders = {
@@ -996,6 +1004,7 @@ async def parse_pico_config(
         device_raw.get("on_hold"),
         placeholders,
         field_name="on_hold",
+        allowed_types=_RAISE_LOWER_TYPES,
     )
 
     off_hold = await _validate_gated_action_field(
@@ -1004,6 +1013,7 @@ async def parse_pico_config(
         device_raw.get("off_hold"),
         placeholders,
         field_name="off_hold",
+        allowed_types=_RAISE_LOWER_TYPES,
     )
 
     stop_hold = await _validate_gated_action_field(
@@ -1020,7 +1030,7 @@ async def parse_pico_config(
         device_raw.get("on_double_tap"),
         placeholders,
         field_name="on_double_tap",
-        allowed_types=frozenset({"3BRL", "P2B", "2B"}),
+        allowed_types=_ON_OFF_ACTION_TYPES,
     )
 
     off_double_tap = await _validate_gated_action_field(
@@ -1029,7 +1039,7 @@ async def parse_pico_config(
         device_raw.get("off_double_tap"),
         placeholders,
         field_name="off_double_tap",
-        allowed_types=frozenset({"3BRL", "P2B", "2B"}),
+        allowed_types=_ON_OFF_ACTION_TYPES,
     )
 
     stop_double_tap = await _validate_gated_action_field(

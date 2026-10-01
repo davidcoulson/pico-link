@@ -11,6 +11,7 @@ PICO_EVENT_TYPE = "lutron_caseta_button_event"
 VALID_PICO_TYPES = {
     "P2B",  # Paddle Pico
     "2B",  # Two-button on/off Pico
+    "2BRL",  # Four-button raise/lower (no STOP)
     "3BRL",  # Five-button raise/lower
     "4B",  # Four-button scene Pico
 }
@@ -24,11 +25,16 @@ VALID_PICO_TYPES = {
 PICO_TYPE_MAP = {
     "PaddleSwitchPico": "P2B",
     "Pico2Button": "2B",
+    "Pico2ButtonRaiseLower": "2BRL",
     "Pico3ButtonRaiseLower": "3BRL",
     "Pico4ButtonScene": "4B",
 }
 
 ON_OFF_PICO_TYPES = frozenset({"P2B", "2B"})
+
+# Pico types whose ON/OFF are plain taps alongside RAISE/LOWER, so those
+# buttons can carry an optional hold or double-tap action of their own.
+RAISE_LOWER_PICO_TYPES = frozenset({"2BRL", "3BRL"})
 
 # Pico types that can be put into dual-light (accent light) mode.
 ACCENT_LIGHT_PICO_TYPES = frozenset({"P2B", "2B", "3BRL"})
@@ -50,6 +56,7 @@ DOUBLE_TAP_WINDOW_MS = 400
 PICO_TYPE_BUTTONS = {
     "P2B": ("on", "off"),
     "2B": ("on", "off"),
+    "2BRL": ("on", "off", "raise", "lower"),
     "3BRL": ("on", "off", "raise", "lower", "stop"),
     "4B": ("button_1", "button_2", "button_3", "off"),
 }
