@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -23,6 +24,8 @@ from .controller import PicoController, type_mismatch_issue_id
 from .memory import EntryMemory, PicoLinkStore
 
 type PicoLinkConfigEntry = ConfigEntry[list[PicoController]]
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def _async_get_store(hass: HomeAssistant) -> PicoLinkStore:
@@ -97,6 +100,26 @@ def _entry_entity_ids(entry: PicoLinkConfigEntry) -> list[str]:
     return entity_ids
 
 
+async def _async_stop_controllers(controllers: list[PicoController]) -> None:
+    """
+    Stop every controller, even if one of them fails.
+
+    Stopping them one at a time and letting an error escape left every
+    later Pico still subscribed to button events, so the entry sat in
+    failed_unload with some remotes still acting on the old settings.
+    Each controller unsubscribes before anything in its stop path that
+    can fail, so a failure here never leaves that one listening either.
+    """
+    for controller in controllers:
+        try:
+            await controller.async_stop()
+        except Exception:
+            _LOGGER.exception(
+                "Device %s: error while stopping",
+                controller.conf.device_id,
+            )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: PicoLinkConfigEntry,
@@ -144,8 +167,7 @@ async def async_setup_entry(
         # Whatever failed for a later device (config, construction or
         # start), the controllers already started would otherwise keep
         # their bus subscriptions alive with no entry to unload them.
-        for started in controllers:
-            await started.async_stop()
+        await _async_stop_controllers(controllers)
 
         raise
 
@@ -157,8 +179,7 @@ async def async_setup_entry(
     # an executor thread, since it calls hass.async_create_task.
     @callback
     def _handle_stop(_event: Event) -> None:
-        for controller in controllers:
-            hass.async_create_task(controller.async_stop())
+        hass.async_create_task(_async_stop_controllers(controllers))
 
     unsub_stop = hass.bus.async_listen_once(
         EVENT_HOMEASSISTANT_STOP,
@@ -420,8 +441,7 @@ async def async_unload_entry(
     entry: PicoLinkConfigEntry,
 ) -> bool:
     """Unload a Pico config entry."""
-    for controller in entry.runtime_data:
-        await controller.async_stop()
+    await _async_stop_controllers(entry.runtime_data)
 
     for device_id in _entry_device_ids(entry):
         ir.async_delete_issue(hass, DOMAIN, _pico_removed_issue_id(device_id))
