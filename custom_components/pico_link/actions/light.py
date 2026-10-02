@@ -26,7 +26,8 @@ ACCENT_EFFECT_MEMORY_KEY = "accent_effect"
 LIGHT_EFFECT_MEMORY_KEY = "light_effect"
 
 # 3BRL dual-light mode: which light the entry's Picos last selected
-# (True = accent, False = center/off) and when. Runtime only.
+# (True = accent, False = center/off) and when. Runtime only, and only
+# trusted for TARGET_CACHE_SECONDS -- see _accent_is_showing().
 SELECTION_KEY = "accent_selected"
 SELECTION_AT_KEY = "accent_selected_at"
 
@@ -212,37 +213,33 @@ class LightActions:
         """
         Return True when the accent light is the currently selected light.
 
-        Decides from the last ON/STOP/OFF on any of this entry's Picos
-        rather than the accent light's reported state, since some
-        lights (e.g. Govee) report stale on/off states for a while after
-        a command. The center light(s) turning on elsewhere (the app, an
-        automation) still overrides an accent selection. Falls back to
-        the reported states only when nothing has been selected yet,
-        e.g. right after a restart.
+        Right after an ON/STOP/OFF on any of this entry's Picos, that press
+        decides for TARGET_CACHE_SECONDS, since the lights may not have
+        reported their new state yet. After that, the lights' reported
+        states decide: the accent light on and the center light(s) off.
+        So a change made elsewhere -- the app, an automation turning the
+        accent light off -- is respected, and RAISE/LOWER then go back to
+        the center light's brightness rather than relighting the accent.
         """
         if not self._stop_selects_accent():
             return False
 
         runtime = self.ctrl.memory.runtime
         selected = runtime.get(SELECTION_KEY)
-        center = self.ctrl.utils.get_entity_state()
-        center_on = bool(center and center.state == "on")
 
-        if selected is None:
-            accent = self.ctrl.hass.states.get(self.ctrl.conf.accent_lights[0])
-            return bool(accent and accent.state == "on") and not center_on
-
-        if not selected:
-            return False
-
-        # Right after STOP the center light may not have reported off yet.
         if (
-            time.monotonic() - runtime.get(SELECTION_AT_KEY, 0.0)
+            selected is not None
+            and time.monotonic() - runtime.get(SELECTION_AT_KEY, 0.0)
             <= self.TARGET_CACHE_SECONDS
         ):
-            return True
+            return selected
 
-        return not center_on
+        accent = self.ctrl.hass.states.get(self.ctrl.conf.accent_lights[0])
+        center = self.ctrl.utils.get_entity_state()
+
+        return bool(accent and accent.state == "on") and not (
+            center and center.state == "on"
+        )
 
     def _transition_data(
         self,

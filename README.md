@@ -413,12 +413,12 @@ uses the preset this time but keeps the name for next time.
 On a 3BRL, dual-light mode takes over STOP, so it can't be combined with
 custom STOP actions (`middle_button`) or STOP light-preset cycling — picking
 an accent light clears any saved STOP actions. Whether the accent light is
-"showing" follows the last ON/STOP/OFF on any Pico in the entry, not the
-accent light's reported state — some lights (Govee, for one) report stale
-on/off states for a while after a command. The center light(s) being
-turned on elsewhere (the app, an automation) still takes over, and right
-after a Home Assistant restart, before any button is pressed, the lights'
-reported states are used. A 3BRL's ON/OFF can still separately use
+"showing" follows the last ON/STOP/OFF on any Pico in the entry for a
+couple of seconds — the lights may not have reported their new state yet —
+and the lights' reported states after that (accent on, center off). So
+switching lights from the app or an automation is respected: with the
+accent light turned off elsewhere, RAISE/LOWER go back to the center
+light's brightness. A 3BRL's ON/OFF can still separately use
 `on_hold`/`off_hold`/`on_double_tap`/`off_double_tap` alongside dual-light
 mode — those actions run in addition to (hold) or instead of (double-tap)
 the tap behavior above.
@@ -462,12 +462,15 @@ pile of checkboxes, since only one of these ever applies at a time:
   exist. With more than one, ON always resets back to the first preset —
   only repeated OFF taps advance through the list, wrapping back to the
   first after the last. When editing an entry that already has more
-  presets than you've stepped through so far, this is preselected by
-  default, so simply saving each screen keeps the rest of the list intact.
+  presets than you've stepped through so far, this is preselected and
+  steps on to the next saved preset.
 - **Remove this preset** (only offered for a preset that already exists)
-  drops it and shifts any later ones up, so a list can be shrunk without
+  drops it and moves on to the next one, so a list can be shrunk without
   clearing `accent_lights` and rebuilding dual-light mode from scratch.
-- **Save** finishes the list here.
+  Removing the last saved preset finishes the list; removing the only
+  one asks for a new preset, since dual-light mode needs at least one.
+- **Save** finishes here, keeping any saved presets after this one
+  unchanged — editing one preset never drops the others.
 
 Rapid repeated brightness taps use the most recently requested brightness for a
 short period instead of waiting for Home Assistant state to update.
@@ -483,6 +486,7 @@ same "What next?" choice (Try it / Save and add another preset / Remove
 this preset / Save, up to 5 presets) as dual-light presets, plus a
 leading "Cycle light appearance from STOP" checkbox — leaving it
 unchecked configures nothing, and STOP keeps its normal behavior instead.
+Removing the only saved light preset turns STOP cycling off the same way.
 
 Every STOP press advances to the next preset, wrapping back to the first
 after the last; turning the light on or off via ON/OFF resets the cycle
