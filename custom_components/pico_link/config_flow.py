@@ -1640,6 +1640,15 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
             if next_action == _PRESET_ACTION_REMOVE:
                 self._accent_preset_read_index += 1
+
+                # Removing the last saved preset ends the walk with what's
+                # left -- unless that's nothing, since dual-light mode
+                # needs at least one preset, so a blank one is offered.
+                if self._accent_preset_read_index >= len(existing) and (
+                    self._accent_presets
+                ):
+                    return await self._async_finish_accent_presets()
+
                 return await self.async_step_accent_light_appearance()
 
             self._accent_preset_read_index += 1
@@ -1651,15 +1660,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             ):
                 return await self.async_step_accent_light_appearance()
 
-            self._options["accent_light_presets"] = self._accent_presets
-
-            if (
-                self._type in CUSTOM_ACTION_PICO_TYPES
-                and self._quick_edit_section != "accent_light"
-            ):
-                return await self.async_step_custom_actions()
-
-            return self._async_finish()
+            return await self._async_finish_accent_presets()
 
         color_temp_range = self._accent_light_color_temp_range()
         preset_number = len(self._accent_presets) + 1
@@ -1686,6 +1687,26 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             last_step=(self._quick_edit_section == "accent_light")
             and not offer_add_another,
         )
+
+    async def _async_finish_accent_presets(self) -> FlowResult:
+        """
+        Save the accent presets and move on.
+
+        Presets are edited one at a time, so any saved preset after the
+        one just handled hasn't been shown yet on this pass. Save keeps
+        those unchanged instead of dropping them.
+        """
+        existing = self._options.get("accent_light_presets") or []
+        kept = self._accent_presets + existing[self._accent_preset_read_index :]
+        self._options["accent_light_presets"] = kept[: self.MAX_ACCENT_PRESETS]
+
+        if (
+            self._type in CUSTOM_ACTION_PICO_TYPES
+            and self._quick_edit_section != "accent_light"
+        ):
+            return await self.async_step_custom_actions()
+
+        return self._async_finish()
 
     def _current_accent_preset_default(self) -> dict[str, Any]:
         """Prefill defaults for the preset currently being edited/added."""
@@ -1810,6 +1831,12 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
             if next_action == _PRESET_ACTION_REMOVE:
                 self._light_preset_read_index += 1
+
+                # Removing the last saved preset ends the walk with what's
+                # left (none at all just turns STOP cycling off).
+                if self._light_preset_read_index >= len(existing):
+                    return await self._async_finish_light_presets()
+
                 return await self.async_step_light_presets()
 
             self._light_preset_read_index += 1
@@ -1821,16 +1848,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             ):
                 return await self.async_step_light_presets()
 
-            self._options["light_presets"] = self._light_presets
-
-            # Light-preset cycling takes over STOP (mirrors
-            # async_step_accent_light for dual-light mode).
-            self._options["middle_button"] = []
-
-            if self._quick_edit_section == "accent_light":
-                return self._async_finish()
-
-            return await self.async_step_custom_actions()
+            return await self._async_finish_light_presets()
 
         color_temp_range = self._light_color_temp_range()
         index = len(self._light_presets)
@@ -1868,6 +1886,28 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 self._quick_edit_section == "accent_light" and not offer_add_another
             ),
         )
+
+    async def _async_finish_light_presets(self) -> FlowResult:
+        """
+        Save the STOP light presets and move on.
+
+        As with accent presets, any saved preset after the one just
+        handled hasn't been shown yet on this pass, so Save keeps those
+        unchanged instead of dropping them.
+        """
+        existing = self._options.get("light_presets") or []
+        kept = self._light_presets + existing[self._light_preset_read_index :]
+        self._options["light_presets"] = kept[: self.MAX_ACCENT_PRESETS]
+
+        # Light-preset cycling takes over STOP (mirrors
+        # async_step_accent_light for dual-light mode).
+        if self._options["light_presets"]:
+            self._options["middle_button"] = []
+
+        if self._quick_edit_section == "accent_light":
+            return self._async_finish()
+
+        return await self.async_step_custom_actions()
 
     def _current_light_preset_default(self) -> dict[str, Any]:
         """Prefill defaults for the light preset currently being edited/added."""
