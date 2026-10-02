@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit review settings for Pico Link.
+# Reference: https://docs.coderabbit.ai/reference/configuration
+
+language: en-US
+
+reviews:
+  profile: chill
+
+  pre_merge_checks:
+    docstrings:
+      # Docstrings here explain non-obvious behavior; small private helpers
+      # deliberately have none, so a coverage percentage is just noise.
+      # Quoted: a bare `off` is YAML for false.
+      mode: "off"
+
+  path_instructions:
+    - path: "tests/**/*.py"
+      instructions: |
+        How this repo tests behavior:
+        - Drive a real PicoController: fire `lutron_caseta_button_event` on
+          the bus (device_id, type, button_type, action) and assert on calls
+          recorded by fake services registered with hass.services, after
+          `await hass.async_block_till_done()`. Don't call LightActions,
+          CoverActions etc. directly for behavior tests, since that skips
+          event filtering, type checks and profile dispatch.
+        - Fake devices should update hass.states the way a real one would;
+          use a "lagging" mode where state reporting late matters.
+        - Keep timing tests fast with small hold_time_ms / step_time_ms. For
+          time windows (TARGET_CACHE_SECONDS), monkeypatch the module's
+          `time` with a fake clock rather than sleeping.
+        - Options-flow tests go through hass.config_entries.options with the
+          `enable_custom_integrations` fixture, and add "lutron_caseta" to
+          hass.config.components, since its hardware library isn't installed.
+        - A bug fix should come with a test that fails without the fix.
+
+    - path: "custom_components/pico_link/**/*.py"
+      instructions: |
+        Pico Link is a Home Assistant custom integration that maps Lutron
+        Caseta Pico remotes to entity control. When reviewing:
+        - Everything runs on HA's event loop: no blocking I/O, and bus or
+          registry listeners that touch HA must be `@callback`.
+        - Work started by a button press goes through
+          PicoController.create_task so unloading can cancel it.
+        - Rapid taps build on the last *requested* value (brightness,
+          position, volume, effect, color temperature) for
+          TARGET_CACHE_SECONDS rather than on lagging reported state; check
+          that changes keep that working.
+        - Custom action lists go through config.async_prepare_actions
+          (placeholder expansion plus HA's script schema), both when parsed
+          and in the options flow's "Test an action" preview, so the two
+          can't drift.
+        - User-facing strings belong in translations/en.json, and behavior
+          changes should be reflected in README.md.
