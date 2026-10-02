@@ -105,6 +105,7 @@
           "light_on_pct": "On brightness",
           "light_low_pct": "Minimum brightness",
           "light_step_pct": "Step size",
+          "light_transition_step_ms": "Brightness step transition",
           "light_transition_on": "On transition",
           "light_transition_off": "Off transition",
           "light_on_off_toggle": "ON/OFF buttons toggle the light",
