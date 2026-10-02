@@ -14,6 +14,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import selector
 from homeassistant.helpers.script import Script
 
+from .config import async_prepare_actions, entity_placeholders
 from .const import (
     ACCENT_LIGHT_PICO_TYPES,
     DOMAIN,
@@ -44,18 +45,33 @@ async def _run_test_action(
     hass: Any,
     actions: list[dict[str, Any]],
     name: str,
+    *,
+    placeholders: dict[str, list[str]] | None,
 ) -> bool:
     """
     Run a configured action sequence immediately, to preview it while editing.
 
-    Returns False (and logs) if the sequence itself raised; this is a
-    best-effort preview, not the authoritative validation (that already
-    happened when the actions were built with the action picker).
+    Prepared exactly as the Pico will run it (see async_prepare_actions):
+    entity placeholders such as "lights" are expanded and template
+    strings become templates, so the preview neither fails on a valid
+    placeholder nor sends a template's literal text. Returns False (and
+    logs) if the sequence is invalid or raised while running.
     """
     if not actions:
         return True
 
-    script = Script(hass, actions, name, DOMAIN)
+    try:
+        prepared = await async_prepare_actions(
+            hass,
+            actions,
+            placeholders=placeholders,
+            context=name,
+        )
+    except ValueError as err:
+        _LOGGER.error("Test action %r is invalid: %s", name, err)
+        return False
+
+    script = Script(hass, prepared, name, DOMAIN)
 
     try:
         await script.async_run(context=Context())
@@ -2006,6 +2022,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                     self.hass,
                     user_input.get(test_action) or [],
                     f"pico_link_test_{test_action}",
+                    placeholders=entity_placeholders(self._options),
                 )
 
                 if not success:
@@ -2105,6 +2122,8 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                     self.hass,
                     user_input.get(test_action) or [],
                     f"pico_link_test_{test_action}",
+                    # 4B scene buttons don't expand placeholders at runtime.
+                    placeholders=None,
                 )
 
                 if not success:

@@ -712,6 +712,35 @@ async def _validate_actions(
         raise ValueError(f"{context}: {err}") from err
 
 
+async def async_prepare_actions(
+    hass: HomeAssistant,
+    raw_actions: Any,
+    *,
+    placeholders: dict[str, list[str]] | None,
+    context: str,
+) -> list[ActionConfig]:
+    """
+    Turn a raw action list into exactly what a Pico runs.
+
+    Expands entity placeholders (when given -- 4B scene buttons have none)
+    and validates against Home Assistant's own script schema, which also
+    turns template strings into templates. The options flow's "Test an
+    action" goes through here too, so a preview runs what the Pico would.
+    """
+    if placeholders is not None:
+        raw_actions = _expand_placeholders(raw_actions, placeholders)
+
+    return await _validate_actions(hass, raw_actions, context=context)
+
+
+def entity_placeholders(options: dict[str, Any]) -> dict[str, list[str]]:
+    """Return each entity placeholder ("lights", ...) mapped to its configured entities."""
+    return {
+        field_name: list(options.get(field_name) or [])
+        for field_name in ("covers", "fans", "lights", "media_players", "switches")
+    }
+
+
 _PICO_TYPE_DISPLAY_ORDER = ("P2B", "2B", "2BRL", "3BRL", "4B")
 
 _3BRL_ONLY: frozenset[str] = frozenset({"3BRL"})
@@ -758,11 +787,10 @@ async def _validate_gated_action_field(
     if raw_value is None:
         return []
 
-    expanded = _expand_placeholders(raw_value, placeholders)
-
-    return await _validate_actions(
+    return await async_prepare_actions(
         hass,
-        expanded,
+        raw_value,
+        placeholders=placeholders,
         context=field_name,
     )
 
@@ -1107,13 +1135,15 @@ async def parse_pico_config(
     # (3BRL, 2BRL), AND ON/OFF DOUBLE-TAP (all ON/OFF types)
     # ------------------------------------------------------------
 
-    placeholders = {
-        "covers": covers,
-        "fans": fans,
-        "lights": lights,
-        "media_players": media_players,
-        "switches": switches,
-    }
+    placeholders = entity_placeholders(
+        {
+            "covers": covers,
+            "fans": fans,
+            "lights": lights,
+            "media_players": media_players,
+            "switches": switches,
+        }
+    )
 
     middle_button = await _validate_gated_action_field(
         hass,
