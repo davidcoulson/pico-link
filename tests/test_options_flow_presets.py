@@ -216,9 +216,7 @@ async def test_removing_the_last_light_preset_finishes(hass):
     result = await _submit(hass, result, **_light("Candle"), next_action="remove")
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert _effects(entry.options["light_presets"], "light_preset_effect") == [
-        "Aurora"
-    ]
+    assert _effects(entry.options["light_presets"], "light_preset_effect") == ["Aurora"]
 
 
 async def test_removing_the_only_light_preset_turns_cycling_off(hass):

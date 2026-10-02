@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, NamedTuple
 
 import voluptuous as vol
 from homeassistant import config_entries
@@ -1005,15 +1005,40 @@ def _configured_device_ids(
     return configured
 
 
+class _PicoChoice(NamedTuple):
+    """One pickable Pico remote."""
+
+    name: str
+    pico_type: str
+    area_id: str | None
+    # Lutron's serial number, printed on the remote. Two Picos can share
+    # a name (a replaced remote left behind in the registry, say), and
+    # this is the only thing in the picker that tells them apart.
+    serial: str | None
+
+
+def _lutron_serial(device: dr.DeviceEntry) -> str | None:
+    """Return the serial number lutron_caseta identifies a Pico by, if any."""
+    for domain, value in device.identifiers:
+        if domain == "lutron_caseta" and str(value).isdigit():
+            return str(value)
+
+    return None
+
+
+def _serial_suffix(choice: _PicoChoice) -> str:
+    return f" · #{choice.serial}" if choice.serial else ""
+
+
 def _eligible_pico_devices(
     hass: Any,
     *,
     exclude_entry_id: str | None = None,
-) -> dict[str, tuple[str, str, str | None]]:
+) -> dict[str, _PicoChoice]:
     """
     Find Lutron Pico remotes that aren't claimed by another entry.
 
-    Returns {device_id: (display_name, pico_type, area_id)}. The Pico
+    Returns {device_id: _PicoChoice}. The Pico
     type is read directly from the model Lutron reports, so it never
     needs to be entered by hand and can never disagree with the
     hardware. Passing exclude_entry_id leaves that entry's own devices
@@ -1032,7 +1057,7 @@ def _eligible_pico_devices(
         exclude_entry_id=exclude_entry_id,
     )
 
-    devices: dict[str, tuple[str, str, str | None]] = {}
+    devices: dict[str, _PicoChoice] = {}
 
     for device in lutron_devices.values():
         if device.id in configured_device_ids:
@@ -1049,8 +1074,14 @@ def _eligible_pico_devices(
         if type_match is not None:
             pico_type = PICO_TYPE_MAP.get(type_match.group(1).strip())
         else:
+            # Longest name first: "Pico2Button" is also a substring of
+            # "Pico2ButtonRaiseLower", so dict order would read a 2BRL as 2B.
             pico_type = next(
-                (code for raw, code in PICO_TYPE_MAP.items() if raw in model),
+                (
+                    PICO_TYPE_MAP[raw]
+                    for raw in sorted(PICO_TYPE_MAP, key=len, reverse=True)
+                    if raw in model
+                ),
                 None,
             )
 
@@ -1058,10 +1089,11 @@ def _eligible_pico_devices(
             # Not a Pico (e.g. the Smart Bridge or a Fan Speed Controller).
             continue
 
-        devices[device.id] = (
-            device.name_by_user or device.name or device.id,
-            pico_type,
-            device.area_id,
+        devices[device.id] = _PicoChoice(
+            name=device.name_by_user or device.name or device.id,
+            pico_type=pico_type,
+            area_id=device.area_id,
+            serial=_lutron_serial(device),
         )
 
     return devices
@@ -1100,7 +1132,7 @@ class PicoLinkConfigFlow(
 
         if user_input is not None:
             device_ids = user_input["device_ids"]
-            types = {devices[device_id][1] for device_id in device_ids}
+            types = {devices[device_id].pico_type for device_id in device_ids}
 
             if not device_ids:
                 errors["base"] = "at_least_one_device_required"
@@ -1115,10 +1147,10 @@ class PicoLinkConfigFlow(
                 self._device_ids = device_ids
                 self._type = types.pop()
                 self._title = ", ".join(
-                    devices[device_id][0]
+                    devices[device_id].name
                     for device_id in sorted(
                         device_ids,
-                        key=lambda device_id: devices[device_id][0],
+                        key=lambda device_id: devices[device_id].name,
                     )
                 )
 
@@ -1134,11 +1166,14 @@ class PicoLinkConfigFlow(
                         options=[
                             selector.SelectOptionDict(
                                 value=device_id,
-                                label=f"{title} ({pico_type})",
+                                label=(
+                                    f"{choice.name} "
+                                    f"({choice.pico_type}{_serial_suffix(choice)})"
+                                ),
                             )
-                            for device_id, (title, pico_type, _area_id) in sorted(
+                            for device_id, choice in sorted(
                                 devices.items(),
-                                key=lambda item: item[1][0],
+                                key=lambda item: item[1].name,
                             )
                         ],
                         mode=selector.SelectSelectorMode.DROPDOWN,
@@ -1357,7 +1392,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 self.hass,
                 exclude_entry_id=self._entry.entry_id,
             ).items()
-            if info[1] == self._type
+            if info.pico_type == self._type
         }
 
         errors: dict[str, str] = {}
@@ -1370,10 +1405,10 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             else:
                 self._device_ids = device_ids
                 self._title = ", ".join(
-                    eligible[device_id][0]
+                    eligible[device_id].name
                     for device_id in sorted(
                         device_ids,
-                        key=lambda device_id: eligible[device_id][0],
+                        key=lambda device_id: eligible[device_id].name,
                     )
                 )
 
@@ -1388,9 +1423,9 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         # hunting through every Pico of this type in the house.
         area_registry = ar.async_get(self.hass)
         reference_area_ids = {
-            eligible[device_id][2]
+            eligible[device_id].area_id
             for device_id in self._device_ids
-            if device_id in eligible and eligible[device_id][2] is not None
+            if device_id in eligible and eligible[device_id].area_id is not None
         }
 
         def _is_recommended(device_id: str, area_id: str | None) -> bool:
@@ -1400,15 +1435,19 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 and area_id in reference_area_ids
             )
 
-        def _option_label(
-            title: str,
-            recommended: bool,
-            area_id: str | None,
-        ) -> str:
-            if not recommended:
+        def _option_label(device_id: str, choice: _PicoChoice) -> str:
+            # Every Pico here is this entry's type, so the serial (not the
+            # type) is what's worth showing beside the name.
+            title = (
+                f"{choice.name} (#{choice.serial})" if choice.serial else choice.name
+            )
+
+            if not _is_recommended(device_id, choice.area_id):
                 return title
 
-            area = area_registry.async_get_area(area_id) if area_id else None
+            area = (
+                area_registry.async_get_area(choice.area_id) if choice.area_id else None
+            )
 
             return (
                 f"{title} — Recommended ({area.name})"
@@ -1416,12 +1455,13 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 else f"{title} — Recommended"
             )
 
-        def _sort_key(
-            item: tuple[str, tuple[str, str, str | None]],
-        ) -> tuple[bool, str]:
-            device_id, (title, _pico_type, area_id) = item
+        def _sort_key(item: tuple[str, _PicoChoice]) -> tuple[bool, str]:
+            device_id, choice = item
 
-            return (not _is_recommended(device_id, area_id), title.casefold())
+            return (
+                not _is_recommended(device_id, choice.area_id),
+                choice.name.casefold(),
+            )
 
         schema = vol.Schema(
             {
@@ -1437,13 +1477,9 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                         options=[
                             selector.SelectOptionDict(
                                 value=device_id,
-                                label=_option_label(
-                                    title,
-                                    _is_recommended(device_id, area_id),
-                                    area_id,
-                                ),
+                                label=_option_label(device_id, choice),
                             )
-                            for device_id, (title, _pico_type, area_id) in sorted(
+                            for device_id, choice in sorted(
                                 eligible.items(),
                                 key=_sort_key,
                             )
