@@ -19,9 +19,16 @@ async def async_get_config_entry_diagnostics(
     Nothing here needs redacting: entry data/options are Pico type,
     device IDs, entity IDs, and timing/behavior values — no credentials
     or personal data.
+
+    Works for an entry that failed to set up too -- when diagnostics are
+    most wanted -- which has no runtime_data, so no running Picos.
     """
+    controllers = getattr(entry, "runtime_data", None) or []
+
     return {
         "title": entry.title,
+        "state": entry.state.value,
+        "reason": entry.reason,
         "data": dict(entry.data),
         "options": dict(entry.options),
         "picos": [
@@ -30,6 +37,6 @@ async def async_get_config_entry_diagnostics(
                 "type": controller.conf.type,
                 "domain": controller.utils.entity_domain(),
             }
-            for controller in entry.runtime_data
+            for controller in controllers
         ],
     }
