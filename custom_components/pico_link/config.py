@@ -96,7 +96,9 @@ class PicoConfig:
     # instead, OFF turns both off, and RAISE/LOWER cycle the accent
     # light's effects while it's showing.
     accent_lights: list[str] = field(default_factory=list)
-    accent_light_presets: list[AccentPreset] = field(default_factory=lambda: [AccentPreset()])
+    accent_light_presets: list[AccentPreset] = field(
+        default_factory=lambda: [AccentPreset()]
+    )
 
     # 3BRL only, and only outside dual-light mode (accent_lights empty).
     # A non-empty list makes STOP cycle `lights` through these
@@ -264,8 +266,7 @@ class PicoConfig:
 
             if not self.lights:
                 raise ValueError(
-                    f"Pico {self.device_id} defines 'light_presets' "
-                    "without 'lights'."
+                    f"Pico {self.device_id} defines 'light_presets' without 'lights'."
                 )
 
             if self.accent_lights:

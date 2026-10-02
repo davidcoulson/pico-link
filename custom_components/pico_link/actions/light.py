@@ -506,7 +506,9 @@ class LightActions:
     def _current_accent_preset(self) -> "AccentPreset":
         """Return the accent preset the light is currently (or about to be) on."""
         presets = self.ctrl.conf.accent_light_presets
-        index = self._accent_preset_index if self._accent_preset_index is not None else 0
+        index = (
+            self._accent_preset_index if self._accent_preset_index is not None else 0
+        )
 
         return presets[min(index, len(presets) - 1)]
 

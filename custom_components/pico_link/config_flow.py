@@ -1008,9 +1008,7 @@ def _eligible_pico_devices(
     lutron_devices = {
         device.id: device
         for entry in hass.config_entries.async_entries("lutron_caseta")
-        for device in dr.async_entries_for_config_entry(
-            device_registry, entry.entry_id
-        )
+        for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id)
     }
 
     configured_device_ids = _configured_device_ids(
@@ -1177,9 +1175,7 @@ class PicoLinkConfigFlow(
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            buttons = {
-                name: actions for name, actions in user_input.items() if actions
-            }
+            buttons = {name: actions for name, actions in user_input.items() if actions}
 
             if not buttons:
                 errors["base"] = "buttons_required"
@@ -1398,7 +1394,11 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
 
             area = area_registry.async_get_area(area_id) if area_id else None
 
-            return f"{title} — Recommended ({area.name})" if area else f"{title} — Recommended"
+            return (
+                f"{title} — Recommended ({area.name})"
+                if area
+                else f"{title} — Recommended"
+            )
 
         def _sort_key(
             item: tuple[str, tuple[str, str, str | None]],
@@ -1841,7 +1841,8 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="light_presets",
             data_schema=_light_preset_appearance_schema(
-                current=self._light_preset_prefill or self._current_light_preset_default(),
+                current=self._light_preset_prefill
+                or self._current_light_preset_default(),
                 effect_options=self._light_effect_options(),
                 supports_color_temp=color_temp_range is not None,
                 color_temp_range=color_temp_range,
@@ -2028,9 +2029,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            buttons = {
-                name: actions for name, actions in user_input.items() if actions
-            }
+            buttons = {name: actions for name, actions in user_input.items() if actions}
 
             if not buttons:
                 errors["base"] = "buttons_required"
