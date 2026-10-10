@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from homeassistant.components.cover import CoverEntityFeature
 from homeassistant.core import State
 
@@ -5,9 +7,9 @@ from custom_components.pico_link.actions.cover import CoverActions
 
 
 def _supports(attributes):
-    return CoverActions(ctrl=None)._supports_set_position(
-        State("cover.test", "open", attributes)
-    )
+    return CoverActions(
+        ctrl=SimpleNamespace(memory=SimpleNamespace(runtime={}))
+    )._supports_set_position(State("cover.test", "open", attributes))
 
 
 def test_set_position_feature_detection():

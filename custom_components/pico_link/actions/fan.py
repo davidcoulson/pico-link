@@ -1,11 +1,13 @@
 # fan_actions.py
 from __future__ import annotations
 
-import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional
 
 from homeassistant.components.fan import FanEntityFeature
 from homeassistant.core import State
+
+from ..memory import SharedTarget
 
 if TYPE_CHECKING:
     from ..controller import PicoController
@@ -30,10 +32,12 @@ class FanActions:
     def __init__(self, ctrl: "PicoController") -> None:
         self.ctrl = ctrl
 
-        # Track the most recently requested percentage so rapid taps do
-        # not depend on immediate Home Assistant state updates.
-        self._target_percentage: Optional[int] = None
-        self._target_updated_at = 0.0
+        # The most recently requested percentage, so rapid taps -- from
+        # any of the entry's Picos -- do not depend on immediate Home
+        # Assistant state updates.
+        self._percentage = SharedTarget(
+            ctrl.memory.runtime, "target_fan_percentage", self.TARGET_CACHE_SECONDS
+        )
 
     # =============================================================
     # PROFILE ENTRY POINTS
@@ -53,10 +57,10 @@ class FanActions:
             return
 
         percentage = self.ctrl.conf.fan_on_pct
-        self._set_percentage_target(percentage)
+        withdraw = self._set_percentage_target(percentage)
 
         self.ctrl.create_task(
-            self._set_percentage(percentage),
+            self._set_percentage(percentage, on_failure=withdraw),
             "fan-turn-on",
         )
 
@@ -64,10 +68,10 @@ class FanActions:
         pass
 
     def press_off(self) -> None:
-        self._set_percentage_target(0)
+        withdraw = self._set_percentage_target(0)
 
         self.ctrl.create_task(
-            self._turn_off(),
+            self._turn_off(on_failure=withdraw),
             "fan-turn-off",
         )
 
@@ -117,25 +121,41 @@ class FanActions:
     # FAN OPERATIONS
     # =============================================================
 
-    async def _turn_on(self) -> None:
+    async def _turn_on(
+        self,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
+    ) -> None:
         await self.ctrl.utils.call_service(
             "turn_on",
             {},
             domain="fan",
+            on_failure=on_failure,
         )
 
-    async def _set_percentage(self, percentage: int) -> None:
+    async def _set_percentage(
+        self,
+        percentage: int,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
+    ) -> None:
         await self.ctrl.utils.call_service(
             "set_percentage",
             {"percentage": percentage},
             domain="fan",
+            on_failure=on_failure,
         )
 
-    async def _turn_off(self) -> None:
+    async def _turn_off(
+        self,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
+    ) -> None:
         await self.ctrl.utils.call_service(
             "turn_off",
             {},
             domain="fan",
+            on_failure=on_failure,
         )
 
     async def _reverse_direction(self) -> None:
@@ -205,18 +225,20 @@ class FanActions:
         if new_percentage == current_percentage:
             return
 
-        self._set_percentage_target(new_percentage)
+        withdraw = self._set_percentage_target(new_percentage)
 
         # Plain on/off fans reject set_percentage; the ladder is [0, 100].
         if not self._supports_set_speed(state):
             self.ctrl.create_task(
-                self._turn_on() if new_percentage > 0 else self._turn_off(),
+                self._turn_on(on_failure=withdraw)
+                if new_percentage > 0
+                else self._turn_off(on_failure=withdraw),
                 task_name,
             )
             return
 
         self.ctrl.create_task(
-            self._set_percentage(new_percentage),
+            self._set_percentage(new_percentage, on_failure=withdraw),
             task_name,
         )
 
@@ -224,18 +246,13 @@ class FanActions:
     # PERCENTAGE TARGET STATE
     # =============================================================
 
-    def _set_percentage_target(self, percentage: int) -> None:
-        """Store the latest requested fan percentage."""
-        self._target_percentage = max(
-            0,
-            min(100, percentage),
-        )
-        self._target_updated_at = time.monotonic()
+    def _set_percentage_target(self, percentage: int) -> Callable[[], None]:
+        """Store the latest requested fan percentage; returns its withdraw."""
+        return self._percentage.set(max(0, min(100, percentage)))
 
     def _clear_percentage_target(self) -> None:
         """Discard the optimistic percentage target."""
-        self._target_percentage = None
-        self._target_updated_at = 0.0
+        self._percentage.clear()
 
     def _percentage_for_step(self, state: State) -> int:
         """
@@ -244,13 +261,10 @@ class FanActions:
         The short cache lets rapid taps build on the previous command
         without keeping an optimistic value authoritative indefinitely.
         """
-        now = time.monotonic()
+        target = self._percentage.get()
 
-        if (
-            self._target_percentage is not None
-            and now - self._target_updated_at <= self.TARGET_CACHE_SECONDS
-        ):
-            return self._target_percentage
+        if target is not None:
+            return target
 
         percentage = self._get_current_percentage(state)
         self._set_percentage_target(percentage)
@@ -337,8 +351,12 @@ class FanActions:
     # =============================================================
 
     def reset_state(self) -> None:
-        """Clear the optimistic percentage target."""
-        self._clear_percentage_target()
+        """
+        Nothing of this Pico's own to clear.
+
+        The requested percentage is shared with the entry's other Picos
+        and starts empty on every setup, so one Pico stopping leaves it.
+        """
 
 
 def build_speed_ladder(percentage_step: float) -> list[int]:

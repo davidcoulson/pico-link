@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any, Optional
 
 from ..const import ON_OFF_PICO_TYPES
+from ..memory import SharedTarget
 
 if TYPE_CHECKING:
     from ..controller import PicoController
@@ -47,12 +47,14 @@ class MediaPlayerActions:
         self._is_holding = False
         self._gesture_generation = 0
 
-        # Track the latest requested volume so rapid taps and ramps do
-        # not depend on immediate Home Assistant state updates. Kept
-        # across releases (for a short time) because some players
-        # (Sonos, Cast) report the new level late.
-        self._target_volume: Optional[float] = None
-        self._target_updated_at = 0.0
+        # Track the latest requested volume so rapid taps and ramps --
+        # from any of the entry's Picos -- do not depend on immediate
+        # Home Assistant state updates. Kept across releases (for a short
+        # time) because some players (Sonos, Cast) report the new level
+        # late.
+        self._volume = SharedTarget(
+            ctrl.memory.runtime, "target_volume", self.TARGET_CACHE_SECONDS
+        )
 
         self._step_task: Optional[asyncio.Task[Any]] = None
         self._hold_task: Optional[asyncio.Task[Any]] = None
@@ -120,9 +122,9 @@ class MediaPlayerActions:
                 )
 
                 if new_volume != current_volume:
-                    self._set_volume_target(new_volume)
+                    withdraw = self._set_volume_target(new_volume)
                     self._step_task = self.ctrl.create_task(
-                        self._set_volume(new_volume),
+                        self._set_volume(new_volume, on_failure=withdraw),
                         f"media-{button}-step",
                     )
 
@@ -295,9 +297,11 @@ class MediaPlayerActions:
                 if new_volume == current_volume:
                     return
 
-                self._set_volume_target(new_volume)
+                withdraw = self._set_volume_target(new_volume)
 
-                await self._set_volume(new_volume)
+                # Sent without waiting for the player, so a slow one
+                # can't stretch the ramp.
+                await self._set_volume(new_volume, on_failure=withdraw)
 
                 if not self._gesture_is_current(button, generation):
                     return
@@ -349,26 +353,30 @@ class MediaPlayerActions:
             domain="media_player",
         )
 
-    async def _set_volume(self, volume: float) -> None:
+    async def _set_volume(
+        self,
+        volume: float,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
+    ) -> None:
         await self.ctrl.utils.call_service(
             "volume_set",
             {"volume_level": volume},
             domain="media_player",
+            on_failure=on_failure,
         )
 
     # =============================================================
     # VOLUME TARGET STATE
     # =============================================================
 
-    def _set_volume_target(self, volume: float) -> None:
-        """Store the latest requested volume level."""
-        self._target_volume = max(0.0, min(1.0, volume))
-        self._target_updated_at = time.monotonic()
+    def _set_volume_target(self, volume: float) -> Callable[[], None]:
+        """Store the latest requested volume level; returns its withdraw."""
+        return self._volume.set(max(0.0, min(1.0, volume)))
 
     def _clear_volume_target(self) -> None:
         """Discard the optimistic volume target."""
-        self._target_volume = None
-        self._target_updated_at = 0.0
+        self._volume.clear()
 
     def _volume_for_step(self) -> Optional[float]:
         """
@@ -377,13 +385,10 @@ class MediaPlayerActions:
         The short cache lets rapid taps build on the previous command
         without keeping an optimistic value authoritative indefinitely.
         """
-        now = time.monotonic()
+        target = self._volume.get()
 
-        if (
-            self._target_volume is not None
-            and now - self._target_updated_at <= self.TARGET_CACHE_SECONDS
-        ):
-            return self._target_volume
+        if target is not None:
+            return target
 
         volume = self._get_current_volume()
 
@@ -442,6 +447,10 @@ class MediaPlayerActions:
     # =============================================================
 
     def reset_state(self) -> None:
-        """Cancel all volume tasks and clear gesture state."""
+        """
+        Cancel all volume tasks and clear gesture state.
+
+        The requested volume is shared with the entry's other Picos and
+        starts empty on every setup, so one Pico stopping leaves it.
+        """
         self._clear_volume_gesture()
-        self._clear_volume_target()

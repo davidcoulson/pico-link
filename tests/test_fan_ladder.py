@@ -52,11 +52,13 @@ def test_ladder_top_is_reachable_downward():
     ],
 )
 def test_current_percentage_for_on_off_fans(state, attributes, expected):
+    from types import SimpleNamespace
+
     from homeassistant.core import State
 
     from custom_components.pico_link.actions.fan import FanActions
 
-    actions = FanActions(ctrl=None)
+    actions = FanActions(ctrl=SimpleNamespace(memory=SimpleNamespace(runtime={})))
 
     assert (
         actions._get_current_percentage(State("fan.test", state, attributes))

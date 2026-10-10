@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -71,3 +73,54 @@ class EntryMemory:
 
     def set(self, key: str, value: Any) -> None:
         self._store.set(self._entry_id, key, value)
+
+
+class SharedTarget:
+    """
+    What this entry's Picos last asked an entity for, trusted only briefly.
+
+    Lights, fans, covers and players can take a moment to report a new
+    state, so a quick second tap steps on from what was last requested
+    instead of repeating the first step from the old state. The request
+    is shared by all of the entry's Picos, which control the same
+    entities, so that holds whichever remote sent it. After max_age
+    seconds the entity's reported state decides again.
+
+    Kept in the entry's runtime dict, so it starts empty after a restart
+    or reload.
+    """
+
+    def __init__(self, runtime: dict[str, Any], key: str, max_age: float) -> None:
+        self._runtime = runtime
+        self._key = key
+        self._max_age = max_age
+
+    def get(self) -> Any:
+        """Return the last requested value while it's fresh, else None."""
+        request = self._runtime.get(self._key)
+
+        if request is None or time.monotonic() - request[1] > self._max_age:
+            return None
+
+        return request[0]
+
+    def set(self, value: Any) -> Callable[[], None]:
+        """
+        Record a new request, and return a callable that withdraws it.
+
+        Pass that to the service call as on_failure: a step that didn't
+        happen mustn't be built on. It withdraws only this request, never
+        a newer one made since.
+        """
+        request = (value, time.monotonic())
+        self._runtime[self._key] = request
+
+        def withdraw() -> None:
+            if self._runtime.get(self._key) is request:
+                del self._runtime[self._key]
+
+        return withdraw
+
+    def clear(self) -> None:
+        """Forget the request, so the entity's reported state decides."""
+        self._runtime.pop(self._key, None)

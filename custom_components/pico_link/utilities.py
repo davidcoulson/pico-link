@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional, cast
 
 from homeassistant.core import Context, HomeAssistant
@@ -145,8 +146,31 @@ class SharedUtils:
         *,
         blocking: bool,
         target: Optional[dict[str, Any]] = None,
+        on_failure: Optional[Callable[[], None]] = None,
     ) -> None:
-        """Execute and centrally log a Home Assistant service call."""
+        """
+        Execute and centrally log a Home Assistant service call.
+
+        on_failure runs if the call fails. A non-blocking call only raises
+        for bad data; the entity's own failure (unreachable, timed out) is
+        logged by Home Assistant and lost. So when there's an on_failure,
+        the call is made blocking in a task of its own: the caller still
+        doesn't wait for the entity, and on_failure hears of either kind.
+        """
+        if on_failure is not None and not blocking:
+            self.hass.async_create_task(
+                self._execute_service_call(
+                    domain,
+                    service,
+                    data,
+                    blocking=True,
+                    target=target,
+                    on_failure=on_failure,
+                ),
+                f"{DOMAIN}:{self.conf.device_id}:{domain}.{service}",
+            )
+            return
+
         try:
             await self.hass.services.async_call(
                 domain,
@@ -165,6 +189,9 @@ class SharedUtils:
                 target,
             )
 
+            if on_failure is not None:
+                on_failure()
+
     async def call_service(
         self,
         service: str,
@@ -172,6 +199,7 @@ class SharedUtils:
         *,
         domain: str,
         blocking: bool = False,
+        on_failure: Optional[Callable[[], None]] = None,
     ) -> None:
         """Call a service for every configured entity in a domain."""
         entities = self.entities_for_domain(domain)
@@ -184,6 +212,9 @@ class SharedUtils:
                 domain,
                 service,
             )
+
+            if on_failure is not None:
+                on_failure()
             return
 
         await self.call_service_for_entities(
@@ -192,6 +223,7 @@ class SharedUtils:
             entities,
             domain=domain,
             blocking=blocking,
+            on_failure=on_failure,
         )
 
     async def call_service_for_entities(
@@ -202,6 +234,7 @@ class SharedUtils:
         *,
         domain: str,
         blocking: bool = False,
+        on_failure: Optional[Callable[[], None]] = None,
     ) -> None:
         """Call a service for an explicit entity list, bypassing domain lookup."""
         if not entities:
@@ -215,6 +248,7 @@ class SharedUtils:
             service,
             service_data,
             blocking=blocking,
+            on_failure=on_failure,
         )
 
     # =============================================================

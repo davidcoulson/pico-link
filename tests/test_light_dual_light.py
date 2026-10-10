@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from homeassistant.core import HomeAssistant, ServiceCall
 
+from custom_components.pico_link import memory as memory_module
 from custom_components.pico_link.actions import light as light_module
 from custom_components.pico_link.actions.light import ACCENT_EFFECT_MEMORY_KEY
 from custom_components.pico_link.config import AccentPreset, PicoConfig
@@ -43,9 +44,11 @@ class _Clock:
 @pytest.fixture
 def clock(monkeypatch) -> _Clock:
     clock = _Clock()
-    monkeypatch.setattr(
-        light_module, "time", SimpleNamespace(monotonic=clock.monotonic)
-    )
+    fake_time = SimpleNamespace(monotonic=clock.monotonic)
+    # The accent selection's timestamp, and the requested targets
+    # (memory.SharedTarget).
+    monkeypatch.setattr(light_module, "time", fake_time)
+    monkeypatch.setattr(memory_module, "time", fake_time)
     return clock
 
 

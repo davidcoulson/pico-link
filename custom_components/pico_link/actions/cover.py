@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import asyncio
-import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional
 
 from homeassistant.components.cover import CoverEntityFeature
 from homeassistant.core import State
 
 from ..const import ON_OFF_PICO_TYPES
+from ..memory import SharedTarget
 
 if TYPE_CHECKING:
     from ..controller import PicoController
@@ -59,10 +60,12 @@ class CoverActions:
         # Invalidates delayed tasks belonging to older gestures.
         self._gesture_generation = 0
 
-        # Retain the most recently requested position so rapid taps do
-        # not depend on Home Assistant updating current_position first.
-        self._target_position: Optional[int] = None
-        self._target_updated_at = 0.0
+        # The most recently requested position, so rapid taps -- from any
+        # of the entry's Picos -- do not depend on Home Assistant updating
+        # current_position first.
+        self._position = SharedTarget(
+            ctrl.memory.runtime, "target_cover_position", self.TARGET_CACHE_SECONDS
+        )
 
     # =============================================================
     # PROFILE HELPERS
@@ -123,18 +126,13 @@ class CoverActions:
             min(100, position),
         )
 
-    def _set_position_target(self, position: int) -> None:
-        """Store the most recently requested cover position."""
-        self._target_position = max(
-            0,
-            min(100, position),
-        )
-        self._target_updated_at = time.monotonic()
+    def _set_position_target(self, position: int) -> Callable[[], None]:
+        """Store the most recently requested cover position; returns its withdraw."""
+        return self._position.set(max(0, min(100, position)))
 
     def _clear_position_target(self) -> None:
         """Discard the optimistic cover-position target."""
-        self._target_position = None
-        self._target_updated_at = 0.0
+        self._position.clear()
 
     def _position_for_step(self) -> Optional[int]:
         """
@@ -143,13 +141,10 @@ class CoverActions:
         A short cache allows rapid taps to build on the previous request
         without keeping an optimistic value authoritative indefinitely.
         """
-        now = time.monotonic()
+        target = self._position.get()
 
-        if (
-            self._target_position is not None
-            and now - self._target_updated_at <= self.TARGET_CACHE_SECONDS
-        ):
-            return self._target_position
+        if target is not None:
+            return target
 
         position = self._current_position()
 
@@ -158,8 +153,12 @@ class CoverActions:
 
         return position
 
-    def _next_position(self, button: str) -> Optional[int]:
-        """Calculate and store the next requested step position."""
+    def _next_position(self, button: str) -> Optional[tuple[int, Callable[[], None]]]:
+        """
+        Calculate and store the next requested step position.
+
+        Returns it with the withdraw to pass to its service call.
+        """
         position = self._position_for_step()
 
         if position is None:
@@ -184,9 +183,7 @@ class CoverActions:
         # Store this target before task creation. Another rapid tap can
         # therefore build from this command even if HA still reports
         # the previous physical position.
-        self._set_position_target(new_position)
-
-        return new_position
+        return new_position, self._set_position_target(new_position)
 
     # =============================================================
     # GESTURE STATE
@@ -319,17 +316,17 @@ class CoverActions:
         if should_open:
             open_position = self.ctrl.conf.cover_open_pos
 
-            self._set_position_target(open_position)
+            withdraw = self._set_position_target(open_position)
 
             self.ctrl.create_task(
-                self._open_to_position(),
+                self._open_to_position(on_failure=withdraw),
                 "cover-open",
             )
         else:
-            self._set_position_target(0)
+            withdraw = self._set_position_target(0)
 
             self.ctrl.create_task(
-                self._close_full(),
+                self._close_full(on_failure=withdraw),
                 "cover-close",
             )
 
@@ -403,13 +400,15 @@ class CoverActions:
             )
             return
 
-        new_position = self._next_position(button)
+        step = self._next_position(button)
 
-        if new_position is None:
+        if step is None:
             return
 
+        new_position, withdraw = step
+
         self._step_task = self.ctrl.create_task(
-            self._set_position(new_position),
+            self._set_position(new_position, on_failure=withdraw),
             task_name,
         )
 
@@ -521,10 +520,11 @@ class CoverActions:
             await self._start_motion(button)
             return
 
-        new_position = self._next_position(button)
+        step = self._next_position(button)
 
-        if new_position is not None:
-            await self._set_position(new_position)
+        if step is not None:
+            new_position, withdraw = step
+            await self._set_position(new_position, on_failure=withdraw)
 
     async def _stop_then_execute(
         self,
@@ -538,7 +538,11 @@ class CoverActions:
     # COVER OPERATIONS
     # =============================================================
 
-    async def _open_to_position(self) -> None:
+    async def _open_to_position(
+        self,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
+    ) -> None:
         """Open to the configured open position."""
         open_position = self.ctrl.conf.cover_open_pos
 
@@ -548,16 +552,22 @@ class CoverActions:
                 "open_cover",
                 {},
                 domain="cover",
+                on_failure=on_failure,
             )
             return
 
-        await self._set_position(open_position)
+        await self._set_position(open_position, on_failure=on_failure)
 
-    async def _close_full(self) -> None:
+    async def _close_full(
+        self,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
+    ) -> None:
         await self.ctrl.utils.call_service(
             "close_cover",
             {},
             domain="cover",
+            on_failure=on_failure,
         )
 
     async def _stop(
@@ -584,12 +594,15 @@ class CoverActions:
     async def _set_position(
         self,
         position: int,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
     ) -> None:
         """Set all configured covers to a specific position."""
         await self.ctrl.utils.call_service(
             "set_cover_position",
             {"position": position},
             domain="cover",
+            on_failure=on_failure,
         )
 
     # =============================================================
@@ -597,6 +610,10 @@ class CoverActions:
     # =============================================================
 
     def reset_state(self) -> None:
-        """Cancel pending gesture tasks and clear all cover state."""
+        """
+        Cancel pending gesture tasks.
+
+        The requested position is shared with the entry's other Picos and
+        starts empty on every setup, so one Pico stopping leaves it.
+        """
         self._clear_gesture_state()
-        self._clear_position_target()

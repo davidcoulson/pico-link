@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional
 
 from ..const import ON_OFF_PICO_TYPES
+from ..memory import SharedTarget
 
 if TYPE_CHECKING:
     from ..config import AccentPreset
@@ -115,10 +116,13 @@ class LightActions:
         # cancel it before or during a ramp.
         self._hold_task: Optional[asyncio.Task[Any]] = None
 
-        # Track the most recently requested brightness so rapid taps and
-        # ramps do not depend on immediate Home Assistant state updates.
-        self._target_brightness_pct: Optional[int] = None
-        self._target_updated_at = 0.0
+        # The most recently requested brightness, so rapid taps and ramps
+        # -- from any of the entry's Picos -- do not depend on immediate
+        # Home Assistant state updates.
+        runtime = ctrl.memory.runtime
+        self._brightness = SharedTarget(
+            runtime, "target_brightness_pct", self.TARGET_CACHE_SECONDS
+        )
 
         # light_presets STOP-cycling: which preset was last applied.
         # None means the next STOP starts over at preset 0; reset
@@ -128,19 +132,20 @@ class LightActions:
         # 3BRL dual-light mode: the most recently requested accent
         # effect, for rapid RAISE/LOWER taps (same idea as the
         # brightness target above).
-        self._target_effect: Optional[str] = None
-        self._effect_updated_at = 0.0
+        self._accent_effect = SharedTarget(
+            runtime, "target_accent_effect", self.TARGET_CACHE_SECONDS
+        )
 
         # light_hold_color_temp: the most recently requested color
         # temperature, so a ramp (or a second hold right after one)
         # builds on what was asked for rather than lagging state.
-        self._target_kelvin: Optional[int] = None
-        self._kelvin_updated_at = 0.0
+        self._kelvin = SharedTarget(runtime, "target_kelvin", self.TARGET_CACHE_SECONDS)
 
         # light_effects: the most recently requested effect, so rapid
         # RAISE/LOWER taps step from what was asked for, not lagging state.
-        self._target_light_effect: Optional[str] = None
-        self._light_effect_updated_at = 0.0
+        self._light_effect = SharedTarget(
+            runtime, "target_light_effect", self.TARGET_CACHE_SECONDS
+        )
 
     # =============================================================
     # PROFILE HELPERS
@@ -207,7 +212,7 @@ class LightActions:
         runtime[SELECTION_AT_KEY] = time.monotonic()
 
         if not accent:
-            self._target_effect = None
+            self._accent_effect.clear()
 
     def _accent_is_showing(self) -> bool:
         """
@@ -313,18 +318,13 @@ class LightActions:
     # BRIGHTNESS TARGET STATE
     # =============================================================
 
-    def _set_brightness_target(self, percentage: int) -> None:
-        """Store the latest requested brightness percentage."""
-        self._target_brightness_pct = max(
-            0,
-            min(100, percentage),
-        )
-        self._target_updated_at = time.monotonic()
+    def _set_brightness_target(self, percentage: int) -> Callable[[], None]:
+        """Store the latest requested brightness; returns its withdraw."""
+        return self._brightness.set(max(0, min(100, percentage)))
 
     def _clear_brightness_target(self) -> None:
         """Discard the optimistic brightness target."""
-        self._target_brightness_pct = None
-        self._target_updated_at = 0.0
+        self._brightness.clear()
 
     def _brightness_for_step(self) -> Optional[int]:
         """
@@ -333,13 +333,10 @@ class LightActions:
         The short cache lets rapid taps build on the previous command
         without keeping an optimistic value authoritative indefinitely.
         """
-        now = time.monotonic()
+        target = self._brightness.get()
 
-        if (
-            self._target_brightness_pct is not None
-            and now - self._target_updated_at <= self.TARGET_CACHE_SECONDS
-        ):
-            return self._target_brightness_pct
+        if target is not None:
+            return target
 
         percentage = self._get_current_brightness_pct()
 
@@ -426,11 +423,11 @@ class LightActions:
     ) -> None:
         """Set the optimistic target and schedule the ON tap action."""
         percentage = self.ctrl.conf.light_on_pct
-        self._set_brightness_target(percentage)
+        withdraw = self._set_brightness_target(percentage)
         self._light_preset_index = None
 
         self.ctrl.create_task(
-            self._turn_on(percentage),
+            self._turn_on(percentage, on_failure=withdraw),
             task_name,
         )
 
@@ -439,11 +436,11 @@ class LightActions:
         task_name: str = "light-turn-off",
     ) -> None:
         """Set the optimistic target to OFF and schedule the tap action."""
-        self._set_brightness_target(0)
+        withdraw = self._set_brightness_target(0)
         self._light_preset_index = None
 
         self.ctrl.create_task(
-            self._turn_off(),
+            self._turn_off(on_failure=withdraw),
             task_name,
         )
 
@@ -456,11 +453,10 @@ class LightActions:
         # tap during state lag toggles instead of repeating turn_on. Only
         # the fresh target is trusted: an on/off-only light reports no
         # brightness, which would otherwise read as off.
-        if (
-            self._target_brightness_pct is not None
-            and time.monotonic() - self._target_updated_at <= self.TARGET_CACHE_SECONDS
-        ):
-            is_on = self._target_brightness_pct > 0
+        target = self._brightness.get()
+
+        if target is not None:
+            is_on = target > 0
         else:
             state = self.ctrl.utils.get_entity_state()
             is_on = state is not None and state.state == "on"
@@ -546,12 +542,12 @@ class LightActions:
     ) -> None:
         """Set the optimistic target and schedule the switch-to-center action."""
         percentage = self.ctrl.conf.light_on_pct
-        self._set_brightness_target(percentage)
+        withdraw = self._set_brightness_target(percentage)
         self._accent_preset_index = None
         self._set_selection(accent=False)
 
         self.ctrl.create_task(
-            self._switch_to_center(percentage),
+            self._switch_to_center(percentage, on_failure=withdraw),
             task_name,
         )
 
@@ -560,12 +556,12 @@ class LightActions:
         task_name: str = "light-all-off",
     ) -> None:
         """Turn off both the center and accent light(s) (3BRL dual-light OFF)."""
-        self._set_brightness_target(0)
+        withdraw = self._set_brightness_target(0)
         self._accent_preset_index = None
         self._set_selection(accent=False)
 
         self.ctrl.create_task(
-            self._all_off(),
+            self._all_off(on_failure=withdraw),
             task_name,
         )
 
@@ -604,11 +600,15 @@ class LightActions:
 
         # Let a RAISE/LOWER right after STOP step from what's about to
         # show, before the light reports it.
-        self._target_effect = data.get("effect") or None
-        self._effect_updated_at = time.monotonic()
+        withdraw: Optional[Callable[[], None]] = None
+
+        if data.get("effect"):
+            withdraw = self._accent_effect.set(data["effect"])
+        else:
+            self._accent_effect.clear()
 
         self.ctrl.create_task(
-            self._switch_to_accent(data),
+            self._switch_to_accent(data, on_failure=withdraw),
             task_name,
         )
 
@@ -640,27 +640,46 @@ class LightActions:
 
         return None
 
-    async def _switch_to_center(self, percentage: int) -> None:
+    async def _switch_to_center(
+        self,
+        percentage: int,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
+    ) -> None:
         """Turn on the center light(s) and turn off the accent light(s)."""
         await asyncio.gather(
-            self._turn_on(percentage),
+            self._turn_on(percentage, on_failure=on_failure),
             self._turn_off_accent(),
         )
 
-    async def _switch_to_accent(self, data: Optional[dict[str, Any]] = None) -> None:
+    async def _switch_to_accent(
+        self,
+        data: Optional[dict[str, Any]] = None,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
+    ) -> None:
         """Turn off the center light(s) and turn on the accent light(s)."""
         await asyncio.gather(
             self._turn_off(),
-            self._turn_on_accent(data),
+            self._turn_on_accent(data, on_failure=on_failure),
         )
 
-    async def _all_off(self) -> None:
+    async def _all_off(
+        self,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
+    ) -> None:
         await asyncio.gather(
-            self._turn_off(),
+            self._turn_off(on_failure=on_failure),
             self._turn_off_accent(),
         )
 
-    async def _turn_on_accent(self, data: Optional[dict[str, Any]] = None) -> None:
+    async def _turn_on_accent(
+        self,
+        data: Optional[dict[str, Any]] = None,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
+    ) -> None:
         data = dict(data) if data is not None else self._accent_light_data()
         data.update(self._transition_data(turning_on=True))
 
@@ -669,6 +688,7 @@ class LightActions:
             data,
             self.ctrl.conf.accent_lights,
             domain="light",
+            on_failure=on_failure,
         )
 
     async def _turn_off_accent(self) -> None:
@@ -703,11 +723,10 @@ class LightActions:
 
     def _current_accent_effect(self) -> Optional[str]:
         """Return the recently requested effect, or resynchronize from HA."""
-        if (
-            self._target_effect is not None
-            and time.monotonic() - self._effect_updated_at <= self.TARGET_CACHE_SECONDS
-        ):
-            return self._target_effect
+        target = self._accent_effect.get()
+
+        if target is not None:
+            return target
 
         state = self.ctrl.hass.states.get(self.ctrl.conf.accent_lights[0])
 
@@ -737,8 +756,7 @@ class LightActions:
             index = 0 if direction > 0 else len(effects) - 1
 
         effect = effects[index]
-        self._target_effect = effect
-        self._effect_updated_at = time.monotonic()
+        withdraw = self._accent_effect.set(effect)
         self.ctrl.memory.set(ACCENT_EFFECT_MEMORY_KEY, effect)
 
         self.ctrl.create_task(
@@ -747,6 +765,7 @@ class LightActions:
                 {"effect": effect},
                 self.ctrl.conf.accent_lights,
                 domain="light",
+                on_failure=withdraw,
             ),
             task_name,
         )
@@ -1034,9 +1053,11 @@ class LightActions:
 
                     return
 
-                self._set_brightness_target(new_percentage)
+                withdraw = self._set_brightness_target(new_percentage)
 
-                await self._set_brightness(new_percentage)
+                # Sent without waiting for the light, so a slow one
+                # can't stretch the ramp.
+                await self._set_brightness(new_percentage, on_failure=withdraw)
 
                 if not self._gesture_is_current(
                     button,
@@ -1090,14 +1111,19 @@ class LightActions:
         if new_percentage == current_percentage:
             return
 
-        self._set_brightness_target(new_percentage)
+        withdraw = self._set_brightness_target(new_percentage)
 
         self.ctrl.create_task(
-            self._set_brightness(new_percentage),
+            self._set_brightness(new_percentage, on_failure=withdraw),
             task_name,
         )
 
-    async def _turn_on(self, percentage: int) -> None:
+    async def _turn_on(
+        self,
+        percentage: int,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
+    ) -> None:
         await self.ctrl.utils.call_service(
             "turn_on",
             {
@@ -1105,18 +1131,26 @@ class LightActions:
                 **self._transition_data(turning_on=True),
             },
             domain="light",
+            on_failure=on_failure,
         )
 
-    async def _turn_off(self) -> None:
+    async def _turn_off(
+        self,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
+    ) -> None:
         await self.ctrl.utils.call_service(
             "turn_off",
             self._transition_data(turning_on=False),
             domain="light",
+            on_failure=on_failure,
         )
 
     async def _set_brightness(
         self,
         percentage: int,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
     ) -> None:
         transition_ms = min(
             self.ctrl.conf.light_transition_step_ms,
@@ -1130,6 +1164,7 @@ class LightActions:
             "turn_on",
             data,
             domain="light",
+            on_failure=on_failure,
         )
 
     # =============================================================
@@ -1162,12 +1197,10 @@ class LightActions:
         the light reports while it's on; then the last effect picked
         here, so a tap after the light was off carries on from it.
         """
-        if (
-            self._target_light_effect is not None
-            and time.monotonic() - self._light_effect_updated_at
-            <= self.TARGET_CACHE_SECONDS
-        ):
-            return self._target_light_effect
+        target = self._light_effect.get()
+
+        if target is not None:
+            return target
 
         state = self.ctrl.utils.get_entity_state()
 
@@ -1218,24 +1251,28 @@ class LightActions:
             index = 0 if direction > 0 else len(effects) - 1
 
         effect = effects[index]
-        self._target_light_effect = effect
-        self._light_effect_updated_at = time.monotonic()
+        withdrawals = [self._light_effect.set(effect)]
         self.ctrl.memory.set(LIGHT_EFFECT_MEMORY_KEY, effect)
 
         data: dict[str, Any] = {"effect": effect}
 
         if brightness == 0:
             percentage = self.ctrl.conf.light_on_pct
-            self._set_brightness_target(percentage)
+            withdrawals.append(self._set_brightness_target(percentage))
             self._light_preset_index = None
             data["brightness_pct"] = percentage
             data.update(self._transition_data(turning_on=True))
+
+        def withdraw() -> None:
+            for withdraw_target in withdrawals:
+                withdraw_target()
 
         self.ctrl.create_task(
             self.ctrl.utils.call_service(
                 "turn_on",
                 data,
                 domain="light",
+                on_failure=withdraw,
             ),
             task_name,
         )
@@ -1268,16 +1305,6 @@ class LightActions:
 
         return low, high
 
-    def _set_color_temp_target(self, kelvin: int) -> None:
-        """Store the latest requested color temperature."""
-        self._target_kelvin = kelvin
-        self._kelvin_updated_at = time.monotonic()
-
-    def _clear_color_temp_target(self) -> None:
-        """Discard the optimistic color temperature target."""
-        self._target_kelvin = None
-        self._kelvin_updated_at = 0.0
-
     def _color_temp_for_step(
         self,
         bounds: tuple[int, int],
@@ -1293,11 +1320,10 @@ class LightActions:
         """
         low, high = bounds
 
-        if (
-            self._target_kelvin is not None
-            and time.monotonic() - self._kelvin_updated_at <= self.TARGET_CACHE_SECONDS
-        ):
-            return self._target_kelvin
+        target = self._kelvin.get()
+
+        if target is not None:
+            return target
 
         state = self.ctrl.utils.get_entity_state()
 
@@ -1349,9 +1375,9 @@ class LightActions:
                 return
 
             percentage = self.ctrl.conf.light_on_pct
-            self._set_brightness_target(percentage)
+            withdraw = self._set_brightness_target(percentage)
             self._light_preset_index = None
-            await self._turn_on(percentage)
+            await self._turn_on(percentage, on_failure=withdraw)
 
         for _ in range(self.MAX_RAMP_STEPS):
             if not self._gesture_is_current(
@@ -1373,9 +1399,9 @@ class LightActions:
             if new == current:
                 return
 
-            self._set_color_temp_target(new)
+            withdraw = self._kelvin.set(new)
 
-            await self._set_color_temp(new)
+            await self._set_color_temp(new, on_failure=withdraw)
 
             if not self._gesture_is_current(
                 button,
@@ -1388,11 +1414,14 @@ class LightActions:
     async def _set_color_temp(
         self,
         kelvin: int,
+        *,
+        on_failure: Optional[Callable[[], None]] = None,
     ) -> None:
         await self.ctrl.utils.call_service(
             "turn_on",
             {"color_temp_kelvin": kelvin},
             domain="light",
+            on_failure=on_failure,
         )
 
     # =============================================================
@@ -1401,18 +1430,13 @@ class LightActions:
 
     def reset_state(self) -> None:
         """
-        Cancel the active gesture and clear this Pico's optimistic state.
+        Cancel the active gesture and clear this Pico's own state.
 
-        The accent preset index and selection live in the entry-shared
-        runtime dict, which is created fresh on every setup, so they
-        are deliberately left alone here: one Pico stopping must not
-        reset where its siblings are in the cycle.
+        The requested targets, accent preset index and selection live in
+        the entry-shared runtime dict, which is created fresh on every
+        setup, so they are deliberately left alone here: one Pico
+        stopping must not reset what its siblings just asked for or
+        where they are in the cycle.
         """
         self._clear_gesture()
-        self._clear_brightness_target()
         self._light_preset_index = None
-        self._target_effect = None
-        self._effect_updated_at = 0.0
-        self._clear_color_temp_target()
-        self._target_light_effect = None
-        self._light_effect_updated_at = 0.0

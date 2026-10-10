@@ -125,7 +125,8 @@ Features include:
 - Ordered custom action execution, built with Home Assistant's native action
   picker
 - Entity placeholder expansion
-- Optimistic light and cover targets for responsive repeated taps
+- Optimistic light, cover, fan and volume targets for responsive repeated
+  taps, shared by all the Picos in an entry
 - Validation of Pico types, entities, domains, actions, and button mappings
 - Protection against configuring the same physical Pico twice
 - Verification that the configured Pico type matches the reported hardware type
@@ -474,7 +475,8 @@ pile of checkboxes, since only one of these ever applies at a time:
   unchanged — editing one preset never drops the others.
 
 Rapid repeated brightness taps use the most recently requested brightness for a
-short period instead of waiting for Home Assistant state to update.
+short period instead of waiting for Home Assistant state to update. That holds
+across the entry's Picos: a tap on one remote steps on from a tap on another.
 
 ### STOP light-preset cycling
 
@@ -1006,8 +1008,14 @@ the Pico again to re-detect its type.
 
 ### Rapid cover or light taps
 
-Pico Link retains recent requested brightness and cover-position targets so
-repeated taps do not depend on immediate entity-state updates.
+Pico Link retains recent requested brightness, effect, color temperature,
+cover-position, fan-speed and volume targets for about two seconds, so
+repeated taps do not depend on immediate entity-state updates. The targets are
+shared by all the Picos in an entry, since they control the same entities.
+
+If a command fails (the device is unreachable or times out), its target is
+dropped, so the next tap steps from the entity's reported state rather than
+from a step that never happened.
 
 When behavior appears out of sync after an external change, wait briefly before
 the next tap so Pico Link resynchronizes from Home Assistant.
