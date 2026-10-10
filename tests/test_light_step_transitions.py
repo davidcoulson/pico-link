@@ -214,3 +214,43 @@ async def test_with_light_effects_taps_step_effects_and_holds_ramp_with_transiti
     assert light.calls == [("turn_on", {"brightness_pct": 60, "transition": 0.1})]
 
     await _stop(hass, controller)
+
+
+async def test_a_slow_light_does_not_stretch_the_ramp_or_outlast_the_release(hass):
+    """
+    Ramp steps go out every step_time_ms however long the light takes.
+
+    Light service calls are non-blocking, so the ramp doesn't wait for a
+    light that holds each call open (for its transition, or just slowly)
+    before sending the next step, and nothing new is sent after release.
+    """
+    pending_s = 0.3  # each call stays open three ramp steps long
+    loop = asyncio.get_running_loop()
+    sent_at: list[float] = []
+
+    async def slow_turn_on(call: ServiceCall) -> None:
+        sent_at.append(loop.time())
+        await asyncio.sleep(pending_s)
+
+    hass.states.async_set(LIGHT, "on", {"brightness": 255})
+    hass.services.async_register("light", "turn_on", slow_turn_on)
+    hass.services.async_register("light", "turn_off", slow_turn_on)
+    controller = await _controller(hass, transition_ms=500, step_ms=100)
+
+    start = loop.time()
+    _fire(hass, "lower", "press", "3BRL")
+    # The tap's step at once, then ramp steps at HOLD_MS + 0/100/200/300 ms.
+    await asyncio.sleep((HOLD_MS + 350) / 1000)
+    released = loop.time()
+    _fire(hass, "lower", "release", "3BRL")
+    await hass.async_block_till_done()
+
+    ramp = [t - start for t in sent_at[1:]]
+    # Waiting on each call would allow only one ramp step before release
+    # (the next would be HOLD_MS + 300 + 100 ms in); on schedule it's four.
+    assert len(ramp) >= 3, ramp
+    assert max(b - a for a, b in zip(ramp, ramp[1:])) < pending_s
+    # Nothing is sent after the release, even with calls still open.
+    assert all(t <= released for t in sent_at)
+
+    await _stop(hass, controller)
