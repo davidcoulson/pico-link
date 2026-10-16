@@ -14,7 +14,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import selector
 from homeassistant.helpers.script import Script
 
-from .config import async_prepare_actions, entity_placeholders
+from .config import async_prepare_actions, entity_placeholders, parse_pico_config
 from .const import (
     ACCENT_LIGHT_PICO_TYPES,
     DOMAIN,
@@ -1106,6 +1106,46 @@ def _eligible_pico_devices(
     return devices
 
 
+async def _async_validate_save(flow: Any) -> str | None:
+    """Validate without executing actions, then check ownership without yielding."""
+    try:
+        for device_id in flow._device_ids:
+            await parse_pico_config(
+                flow.hass,
+                {**flow._options, "device_id": device_id, "type": flow._type},
+            )
+    except ValueError:
+        return "invalid_configuration"
+
+    entry = getattr(flow, "_entry", None)
+    claimed = _configured_device_ids(
+        flow.hass, exclude_entry_id=entry.entry_id if entry else None
+    )
+    # A new flow can be finishing in HA's flow manager before its entry
+    # appears. Reserve its devices until that flow leaves the manager.
+    for progress in flow.hass.config_entries.flow.async_progress_by_handler(DOMAIN):
+        if progress["flow_id"] != flow.flow_id:
+            claimed.update(progress["context"].get("pico_link_saving_device_ids", []))
+
+    if claimed.intersection(flow._device_ids):
+        return "device_already_configured"
+
+    return None
+
+
+async def _async_save_error(flow: Any, error: str) -> FlowResult:
+    """Keep the current form and submitted actions available for correction."""
+    if flow.cur_step:
+        step = flow.cur_step["step_id"]
+    elif flow._type == "4B":
+        step = "buttons"
+    else:
+        step = "custom_actions" if hasattr(flow, "_entry") else "entities"
+    result = await getattr(flow, f"async_step_{step}")()
+    result["errors"] = {"base": error}
+    return result
+
+
 # ================================================================
 # CONFIG FLOW (add a new Pico)
 # ================================================================
@@ -1217,11 +1257,11 @@ class PicoLinkConfigFlow(
                     user_input[field],
                     self.hass,
                 )
-                return self._async_finish()
+                return await self._async_finish()
 
         return self.async_show_form(
             step_id="entities",
-            data_schema=_entities_schema(),
+            data_schema=_entities_schema(current=self._options),
             errors=errors,
             last_step=True,
         )
@@ -1239,16 +1279,21 @@ class PicoLinkConfigFlow(
                 errors["base"] = "buttons_required"
             else:
                 self._options["buttons"] = buttons
-                return self._async_finish()
+                return await self._async_finish()
 
         return self.async_show_form(
             step_id="buttons",
-            data_schema=_buttons_schema(),
+            data_schema=_buttons_schema(current=self._options.get("buttons")),
             errors=errors,
             last_step=True,
         )
 
-    def _async_finish(self) -> FlowResult:
+    async def _async_finish(self) -> FlowResult:
+        error = await _async_validate_save(self)
+        if error:
+            return await _async_save_error(self, error)
+
+        self.context["pico_link_saving_device_ids"] = list(self._device_ids)
         return self.async_create_entry(
             title=self._title,
             data={
@@ -1532,6 +1577,8 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                         "accent_lights",
                         "accent_light_presets",
                         "light_presets",
+                        "light_hold_color_temp",
+                        "light_effects",
                     ):
                         self._options.pop(accent_field, None)
 
@@ -1574,7 +1621,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 self._options.update(user_input)
 
                 if self._quick_edit_section == "options":
-                    return self._async_finish()
+                    return await self._async_finish()
 
                 if self._type in ACCENT_LIGHT_PICO_TYPES and self._domain == "light":
                     return await self.async_step_accent_light()
@@ -1582,7 +1629,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 if self._custom_actions_available():
                     return await self.async_step_custom_actions()
 
-                return self._async_finish()
+                return await self._async_finish()
 
         return self.async_show_form(
             step_id="options",
@@ -1651,12 +1698,12 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                     return await self.async_step_light_presets()
 
                 if self._quick_edit_section == "accent_light":
-                    return self._async_finish()
+                    return await self._async_finish()
 
                 if self._type in ("P2B", "2B"):
                     return await self.async_step_custom_actions()
 
-                return self._async_finish()
+                return await self._async_finish()
 
         return self.async_show_form(
             step_id="accent_light",
@@ -1765,7 +1812,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
         ):
             return await self.async_step_custom_actions()
 
-        return self._async_finish()
+        return await self._async_finish()
 
     def _current_accent_preset_default(self) -> dict[str, Any]:
         """Prefill defaults for the preset currently being edited/added."""
@@ -1884,7 +1931,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 self._options["light_presets"] = []
 
                 if self._quick_edit_section == "accent_light":
-                    return self._async_finish()
+                    return await self._async_finish()
 
                 return await self.async_step_custom_actions()
 
@@ -1964,7 +2011,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             self._options["middle_button"] = []
 
         if self._quick_edit_section == "accent_light":
-            return self._async_finish()
+            return await self._async_finish()
 
         return await self.async_step_custom_actions()
 
@@ -2108,8 +2155,8 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                     ):
                         self._options[field_name] = user_input.get(field_name, [])
 
-                    self._custom_actions_prefill = None
-                    return self._async_finish()
+                    self._custom_actions_prefill = user_input
+                    return await self._async_finish()
 
         return self.async_show_form(
             step_id="custom_actions",
@@ -2137,7 +2184,7 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                 self._options["buttons"] = buttons
 
                 if self._quick_edit_section == "buttons":
-                    return self._async_finish()
+                    return await self._async_finish()
 
                 return await self.async_step_scene_hold_actions()
 
@@ -2201,8 +2248,8 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
                     self._options["button_hold"] = button_hold
                     self._options["button_double_tap"] = button_double_tap
 
-                    self._scene_hold_prefill = None
-                    return self._async_finish()
+                    self._scene_hold_prefill = user_input
+                    return await self._async_finish()
 
         return self.async_show_form(
             step_id="scene_hold_actions",
@@ -2213,7 +2260,11 @@ class PicoLinkOptionsFlow(config_entries.OptionsFlow):
             last_step=True,
         )
 
-    def _async_finish(self) -> FlowResult:
+    async def _async_finish(self) -> FlowResult:
+        error = await _async_validate_save(self)
+        if error:
+            return await _async_save_error(self, error)
+
         # Update data/title and options together so this is one reload,
         # not two — async_create_entry below would otherwise reapply
         # the same options a second time via its own update_entry call.

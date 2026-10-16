@@ -53,7 +53,9 @@
       "single_domain_required": "Fill in exactly one of the fields above — the one domain this Pico controls — and leave the rest empty.",
       "buttons_required": "Configure at least one button with actions.",
       "at_least_one_device_required": "Select at least one Pico to keep in this entry.",
-      "mixed_pico_types": "Select devices of only one Pico type — the devices you picked aren't all the same type."
+      "mixed_pico_types": "Select devices of only one Pico type — the devices you picked aren't all the same type.",
+      "invalid_configuration": "The configuration or actions are invalid. Correct them before saving.",
+      "device_already_configured": "A selected Pico was assigned to another entry. Remove it from that entry or restart this flow and select different Picos."
     },
     "abort": {
       "already_configured": "This Pico is already configured.",
@@ -233,7 +235,9 @@
       "middle_button_accent_light_conflict": "On a 3BRL, STOP switches to the accent light in dual-light mode, so it can't also run STOP actions — clear the STOP actions, or remove the accent light.",
       "hold_color_temp_accent_light_conflict": "Holding ON/OFF to adjust color temperature can't be combined with an accent light (dual-light mode) — turn one of them off before continuing.",
       "hold_color_temp_custom_actions_conflict": "Holding ON/OFF to adjust color temperature needs the ON and OFF buttons to itself — clear their hold and double-tap actions under Custom actions first, then turn this on.",
-      "light_effects_accent_light_conflict": "RAISE/LOWER effect cycling can't be combined with an accent light — in dual-light mode RAISE/LOWER already cycle the accent light's effects. Clear one of them before continuing."
+      "light_effects_accent_light_conflict": "RAISE/LOWER effect cycling can't be combined with an accent light — in dual-light mode RAISE/LOWER already cycle the accent light's effects. Clear one of them before continuing.",
+      "invalid_configuration": "The configuration or actions are invalid. Correct them before saving.",
+      "device_already_configured": "A selected Pico was assigned to another entry. Remove it from that entry or restart this flow and select different Picos."
     }
   },
   "issues": {
