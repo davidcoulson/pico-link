@@ -358,17 +358,6 @@ class PicoController:
             self._unsub_event()
             self._unsub_event = None
 
-        # Let domain handlers clear their gesture-specific state.
-        for action_handler in self.actions.values():
-            reset = getattr(
-                action_handler,
-                "reset_state",
-                None,
-            )
-
-            if callable(reset):
-                reset()
-
         # Task completion callbacks mutate self._tasks, so operate on
         # a stable copy.
         tasks = tuple(self._tasks)
@@ -383,6 +372,24 @@ class PicoController:
             )
 
         self._tasks.clear()
+
+        # Service and gesture tasks are canceled before a domain performs
+        # any final safety command, so stale motion cannot follow its stop.
+        for action_handler in self.actions.values():
+            stop = getattr(action_handler, "async_stop", None)
+            if callable(stop):
+                await stop()
+
+        # Let domain handlers clear their gesture-specific state.
+        for action_handler in self.actions.values():
+            reset = getattr(
+                action_handler,
+                "reset_state",
+                None,
+            )
+
+            if callable(reset):
+                reset()
 
         # Release the cached action Scripts so they drop out of Home
         # Assistant's script registry with this controller.

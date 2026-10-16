@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -13,6 +14,11 @@ from ..memory import SharedTarget
 
 if TYPE_CHECKING:
     from ..controller import PicoController
+
+
+_LOGGER = logging.getLogger(__name__)
+
+SHUTDOWN_STOP_TIMEOUT = 2.0
 
 
 class CoverActions:
@@ -52,6 +58,7 @@ class CoverActions:
         # Only one ON/OFF/RAISE/LOWER gesture may be active at a time.
         self._active_button: Optional[str] = None
         self._is_holding = False
+        self._continuous_motion = False
 
         # Retain gesture tasks so releases and newer commands can cancel them.
         self._step_task: Optional[asyncio.Task[Any]] = None
@@ -303,7 +310,7 @@ class CoverActions:
 
     async def _stop_then_onoff_tap(self, button: str) -> None:
         """Stop continuous movement, then run the ON/OFF tap action."""
-        await self._stop(blocking=True)
+        await self._stop()
         self._start_onoff_tap(button)
 
     def _start_onoff_tap(self, button: str) -> None:
@@ -508,7 +515,7 @@ class CoverActions:
         generation: int,
     ) -> None:
         """Stop previous continuous movement before stepping."""
-        await self._stop(blocking=True)
+        await self._stop()
 
         if generation != self._gesture_generation or self._active_button != button:
             return
@@ -531,7 +538,7 @@ class CoverActions:
         actions: Any,
     ) -> None:
         """Stop movement before running custom middle-button actions."""
-        await self._stop(blocking=True)
+        await self._stop()
         await self.ctrl.utils.execute_button_action(actions)
 
     # =============================================================
@@ -570,20 +577,19 @@ class CoverActions:
             on_failure=on_failure,
         )
 
-    async def _stop(
-        self,
-        *,
-        blocking: bool = False,
-    ) -> None:
+    async def _stop(self) -> None:
         await self.ctrl.utils.call_service(
             "stop_cover",
             {},
             domain="cover",
-            blocking=blocking,
+            blocking=True,
         )
+        self._continuous_motion = False
 
     async def _start_motion(self, direction: str) -> None:
         service = "open_cover" if direction == "raise" else "close_cover"
+        if self._is_holding:
+            self._continuous_motion = True
 
         await self.ctrl.utils.call_service(
             service,
@@ -608,6 +614,21 @@ class CoverActions:
     # =============================================================
     # LIFECYCLE
     # =============================================================
+
+    async def async_stop(self) -> None:
+        """Best-effort stop for continuous travel initiated by this Pico."""
+        if not self._continuous_motion:
+            return
+
+        try:
+            async with asyncio.timeout(SHUTDOWN_STOP_TIMEOUT):
+                await self._stop()
+        except TimeoutError:
+            _LOGGER.warning(
+                "Device %s: cover stop timed out on shutdown", self.ctrl.conf.device_id
+            )
+        finally:
+            self._continuous_motion = False
 
     def reset_state(self) -> None:
         """
