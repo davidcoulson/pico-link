@@ -1,6 +1,7 @@
 # fan_actions.py
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional
 
@@ -338,7 +339,7 @@ class FanActions:
 
         try:
             percentage = int(float(raw_percentage))
-        except ValueError:
+        except (ValueError, OverflowError):
             return 0
 
         return max(
@@ -367,7 +368,16 @@ def build_speed_ladder(percentage_step: float) -> list[int]:
     each speed 1..speed_count, so the rungs are exactly the percentages
     HA reports for a fan with that many speeds.
     """
-    speed_count = max(1, round(100 / percentage_step))
+    if (
+        isinstance(percentage_step, bool)
+        or not isinstance(percentage_step, (int, float))
+        or not math.isfinite(percentage_step)
+        or percentage_step <= 0
+    ):
+        return [0, 100]
+
+    # Clamp before division too: subnormal positive steps can overflow.
+    speed_count = min(100, max(1, round(100 / max(1, percentage_step))))
 
     return [0] + [
         int(speed * 100 // speed_count) for speed in range(1, speed_count + 1)

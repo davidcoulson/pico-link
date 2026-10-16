@@ -64,3 +64,13 @@ def test_current_percentage_for_on_off_fans(state, attributes, expected):
         actions._get_current_percentage(State("fan.test", state, attributes))
         == expected
     )
+
+
+@pytest.mark.parametrize("step", [0, -1, float("nan"), float("inf"), True, "25", None])
+def test_invalid_speed_step_falls_back(step):
+    assert build_speed_ladder(step) == [0, 100]
+
+
+@pytest.mark.parametrize("step", [0.001, 1e-9, 5e-324])
+def test_tiny_speed_step_is_bounded(step):
+    assert build_speed_ladder(step) == list(range(101))
