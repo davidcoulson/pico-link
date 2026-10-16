@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional, cast
@@ -13,6 +14,8 @@ if TYPE_CHECKING:
     from .controller import PicoController
 
 _LOGGER = logging.getLogger(__name__)
+
+SERVICE_CALL_TIMEOUT = 10.0
 
 
 async def async_release_script(hass: HomeAssistant, script: Script) -> None:
@@ -151,14 +154,12 @@ class SharedUtils:
         """
         Execute and centrally log a Home Assistant service call.
 
-        on_failure runs if the call fails. A non-blocking call only raises
-        for bad data; the entity's own failure (unreachable, timed out) is
-        logged by Home Assistant and lost. So when there's an on_failure,
-        the call is made blocking in a task of its own: the caller still
-        doesn't wait for the entity, and on_failure hears of either kind.
+        Non-blocking requests run as controller-owned blocking calls, so
+        unload cancels the service work and failures reach on_failure.
+        Every call has a bounded execution time.
         """
-        if on_failure is not None and not blocking:
-            self.hass.async_create_task(
+        if not blocking:
+            self.ctrl.create_task(
                 self._execute_service_call(
                     domain,
                     service,
@@ -167,18 +168,19 @@ class SharedUtils:
                     target=target,
                     on_failure=on_failure,
                 ),
-                f"{DOMAIN}:{self.conf.device_id}:{domain}.{service}",
+                f"{domain}.{service}",
             )
             return
 
         try:
-            await self.hass.services.async_call(
-                domain,
-                service,
-                data,
-                blocking=blocking,
-                target=target,
-            )
+            async with asyncio.timeout(SERVICE_CALL_TIMEOUT):
+                await self.hass.services.async_call(
+                    domain,
+                    service,
+                    data,
+                    blocking=True,
+                    target=target,
+                )
         except Exception:
             _LOGGER.exception(
                 "Device %s: error calling %s.%s with data=%s target=%s",
