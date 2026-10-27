@@ -75,6 +75,11 @@ class PicoConfig:
     light_transition_on: int = 0
     light_transition_off: int = 0
     light_on_off_toggle: bool = False
+    # Applied with light_on_pct whenever the Pico turns `lights` on. An
+    # empty effect / 0 K leaves the light's current effect / color as is;
+    # "None" clears a running effect.
+    light_on_effect: str = ""
+    light_on_color_temp_kelvin: int = 0
 
     # 2BRL and 3BRL only (P2B/2B already use ON/OFF holds for
     # brightness). Holding ON ramps the light(s) cooler and holding OFF
@@ -1120,6 +1125,18 @@ async def parse_pico_config(
         merged.get("light_effects"),
     )
 
+    light_on_effect = str(merged.get("light_on_effect") or "").strip()
+
+    light_on_color_temp_kelvin = _normalize_int(
+        merged.get(
+            "light_on_color_temp_kelvin",
+            0,
+        ),
+        default=0,
+        min_val=1000,
+        max_val=10000,
+    )
+
     accent_light_presets = _normalize_accent_presets(
         merged.get("accent_light_presets"),
     )
@@ -1264,6 +1281,8 @@ async def parse_pico_config(
         light_on_off_toggle=light_on_off_toggle,
         light_hold_color_temp=light_hold_color_temp,
         light_effects=light_effects,
+        light_on_effect=light_on_effect,
+        light_on_color_temp_kelvin=light_on_color_temp_kelvin,
         accent_light_presets=accent_light_presets,
         light_presets=light_presets,
         media_player_vol_step=media_player_vol_step,

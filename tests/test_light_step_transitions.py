@@ -254,3 +254,29 @@ async def test_a_slow_light_does_not_stretch_the_ramp_or_outlast_the_release(has
     assert all(t <= released for t in sent_at)
 
     await _stop(hass, controller)
+
+
+async def test_on_tap_applies_light_on_effect_and_color_temp(hass):
+    light = _FakeLight(hass, effect="Candle")
+    controller = await _controller(
+        hass,
+        transition_ms=0,
+        light_on_effect="None",
+        light_on_color_temp_kelvin=3000,
+    )
+
+    await _tap(hass, "on")
+
+    assert light.calls == [
+        (
+            "turn_on",
+            {
+                "brightness_pct": 100,
+                "effect": "None",
+                "color_temp_kelvin": 3000,
+                "transition": 1,
+            },
+        ),
+    ]
+
+    await _stop(hass, controller)

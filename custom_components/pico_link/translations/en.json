@@ -105,6 +105,8 @@
           "cover_inverted": "Invert on/off direction",
           "fan_on_pct": "On speed",
           "light_on_pct": "On brightness",
+          "light_on_effect": "On effect",
+          "light_on_color_temp_kelvin": "On color temperature",
           "light_low_pct": "Minimum brightness",
           "light_step_pct": "Step size",
           "light_transition_step_ms": "Brightness step transition",
@@ -117,7 +119,9 @@
         },
         "data_description": {
           "light_hold_color_temp": "2BRL and 3BRL only. Hold ON to make the light cooler and OFF to make it warmer, while RAISE/LOWER keep adjusting brightness. Holding ON turns the light on first if it's off. Taps still turn the light on and off, once you let go. ON and OFF can't also run custom hold or double-tap actions, and this can't be combined with an accent light.",
-          "light_effects": "2BRL and 3BRL only. Pick favorites from the light's own effects, in the order you want them. A RAISE tap steps to the next one and a LOWER tap to the previous, wrapping around; holding RAISE/LOWER still ramps brightness. A RAISE tap while the light is off turns it on with the next effect. Leave empty to keep RAISE/LOWER taps on brightness. Can't be combined with an accent light."
+          "light_effects": "2BRL and 3BRL only. Pick favorites from the light's own effects, in the order you want them. A RAISE tap steps to the next one and a LOWER tap to the previous, wrapping around; holding RAISE/LOWER still ramps brightness. A RAISE tap while the light is off turns it on with the next effect. Leave empty to keep RAISE/LOWER taps on brightness. Can't be combined with an accent light.",
+          "light_on_effect": "Effect the light gets whenever the Pico turns it on. Pick None to stop a running effect; leave empty to keep whatever it was showing.",
+          "light_on_color_temp_kelvin": "Color temperature in kelvin the light gets whenever the Pico turns it on. 0 keeps its current color."
         }
       },
       "accent_light": {

@@ -309,6 +309,40 @@ def _options_schema(
 
         fields[
             vol.Optional(
+                "light_on_effect",
+                default=current.get(
+                    "light_on_effect",
+                    "",
+                ),
+            )
+        ] = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=list(dict.fromkeys(["None", *(effect_options or [])])),
+                custom_value=True,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        )
+
+        fields[
+            vol.Optional(
+                "light_on_color_temp_kelvin",
+                default=current.get(
+                    "light_on_color_temp_kelvin",
+                    0,
+                ),
+            )
+        ] = selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0,
+                max=10000,
+                step=100,
+                unit_of_measurement="K",
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        )
+
+        fields[
+            vol.Optional(
                 "light_on_off_toggle",
                 default=current.get(
                     "light_on_off_toggle",

@@ -1128,11 +1128,21 @@ class LightActions:
             "turn_on",
             {
                 "brightness_pct": percentage,
+                **self._on_appearance_data(),
                 **self._transition_data(turning_on=True),
             },
             domain="light",
             on_failure=on_failure,
         )
+
+    def _on_appearance_data(self) -> dict[str, Any]:
+        """The light_on_effect / light_on_color_temp_kelvin service data, if set."""
+        data: dict[str, Any] = {}
+        if self.ctrl.conf.light_on_effect:
+            data["effect"] = self.ctrl.conf.light_on_effect
+        if self.ctrl.conf.light_on_color_temp_kelvin:
+            data["color_temp_kelvin"] = self.ctrl.conf.light_on_color_temp_kelvin
+        return data
 
     async def _turn_off(
         self,

@@ -325,6 +325,8 @@ step of setup (or editing), pre-filled with these defaults:
 | `cover_inverted`         | Cover                |        `false` | Boolean                               |
 | `fan_on_pct`             | Fan                  |          `100` | `1–100` percent                       |
 | `light_on_pct`           | Light                |          `100` | `1–100` percent                       |
+| `light_on_effect`        | Light                |           `""` | Effect set whenever the Pico turns the light on; `None` stops a running effect, empty keeps it |
+| `light_on_color_temp_kelvin` | Light            |            `0` | Kelvin set whenever the Pico turns the light on; `0` keeps the current color |
 | `light_low_pct`          | Light                |            `5` | `1–99` percent                        |
 | `light_step_pct`         | Light                |           `10` | `1–25` percent                        |
 | `light_transition_step_ms` | Light            |            `0` | `0–2000` ms                          |
