@@ -280,3 +280,29 @@ async def test_on_tap_applies_light_on_effect_and_color_temp(hass):
     ]
 
     await _stop(hass, controller)
+
+
+async def test_raise_tap_from_off_applies_the_on_look(hass):
+    light = _FakeLight(hass)
+    light._on = False
+    light._publish()
+    controller = await _controller(
+        hass,
+        transition_ms=0,
+        light_on_effect="None",
+        light_on_color_temp_kelvin=3000,
+    )
+
+    await _tap(hass, "raise")
+    await _tap(hass, "raise")
+
+    assert light.calls == [
+        (
+            "turn_on",
+            {"brightness_pct": 10, "effect": "None", "color_temp_kelvin": 3000},
+        ),
+        # Only the step that turned it on carries the look.
+        ("turn_on", {"brightness_pct": 20}),
+    ]
+
+    await _stop(hass, controller)

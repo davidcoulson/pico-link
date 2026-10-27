@@ -26,6 +26,17 @@ ACCENT_EFFECT_MEMORY_KEY = "accent_effect"
 # carries on from it instead of starting over.
 LIGHT_EFFECT_MEMORY_KEY = "light_effect"
 
+
+def _chain(*callbacks: Optional[Callable[[], None]]) -> Callable[[], None]:
+    """Return one callable that runs each of these (skipping None) in order."""
+
+    def run() -> None:
+        for callback in callbacks:
+            if callback is not None:
+                callback()
+
+    return run
+
 # 3BRL dual-light mode: which light the entry's Picos last selected
 # (True = accent, False = center/off) and when. Runtime only, and only
 # trusted for TARGET_CACHE_SECONDS -- see _accent_is_showing().
@@ -1112,9 +1123,14 @@ class LightActions:
             return
 
         withdraw = self._set_brightness_target(new_percentage)
+        extra: dict[str, Any] = {}
+
+        # A step up from off turns the light on: give it the ON look.
+        if current_percentage == 0:
+            withdraw = _chain(withdraw, self._add_on_appearance(extra))
 
         self.ctrl.create_task(
-            self._set_brightness(new_percentage, on_failure=withdraw),
+            self._set_brightness(new_percentage, on_failure=withdraw, extra=extra),
             task_name,
         )
 
@@ -1124,25 +1140,45 @@ class LightActions:
         *,
         on_failure: Optional[Callable[[], None]] = None,
     ) -> None:
+        data: dict[str, Any] = {
+            "brightness_pct": percentage,
+            **self._transition_data(turning_on=True),
+        }
+        withdraw = _chain(on_failure, self._add_on_appearance(data))
+
         await self.ctrl.utils.call_service(
             "turn_on",
-            {
-                "brightness_pct": percentage,
-                **self._on_appearance_data(),
-                **self._transition_data(turning_on=True),
-            },
+            data,
             domain="light",
-            on_failure=on_failure,
+            on_failure=withdraw,
         )
 
-    def _on_appearance_data(self) -> dict[str, Any]:
-        """The light_on_effect / light_on_color_temp_kelvin service data, if set."""
-        data: dict[str, Any] = {}
-        if self.ctrl.conf.light_on_effect:
-            data["effect"] = self.ctrl.conf.light_on_effect
-        if self.ctrl.conf.light_on_color_temp_kelvin:
-            data["color_temp_kelvin"] = self.ctrl.conf.light_on_color_temp_kelvin
-        return data
+    def _add_on_appearance(
+        self,
+        data: dict[str, Any],
+        *,
+        effect: bool = True,
+    ) -> Callable[[], None]:
+        """
+        Add light_on_effect / light_on_color_temp_kelvin to turn-on data.
+
+        Records them as the effect/kelvin targets too, so a quick
+        RAISE/LOWER or color-temperature hold steps from the new look
+        rather than a stale one. Returns the withdraw for those targets.
+        """
+        withdrawals: list[Callable[[], None]] = []
+        effect_name = self.ctrl.conf.light_on_effect
+        kelvin = self.ctrl.conf.light_on_color_temp_kelvin
+
+        if effect and effect_name:
+            data["effect"] = effect_name
+            withdrawals.append(self._light_effect.set(effect_name))
+
+        if kelvin:
+            data["color_temp_kelvin"] = kelvin
+            withdrawals.append(self._kelvin.set(kelvin))
+
+        return _chain(*withdrawals)
 
     async def _turn_off(
         self,
@@ -1161,12 +1197,13 @@ class LightActions:
         percentage: int,
         *,
         on_failure: Optional[Callable[[], None]] = None,
+        extra: Optional[dict[str, Any]] = None,
     ) -> None:
         transition_ms = min(
             self.ctrl.conf.light_transition_step_ms,
             self.ctrl.conf.step_time_ms,
         )
-        data: dict[str, Any] = {"brightness_pct": percentage}
+        data: dict[str, Any] = {"brightness_pct": percentage, **(extra or {})}
         if transition_ms > 0:
             data["transition"] = transition_ms / 1000
 
@@ -1272,6 +1309,7 @@ class LightActions:
             self._light_preset_index = None
             data["brightness_pct"] = percentage
             data.update(self._transition_data(turning_on=True))
+            withdrawals.append(self._add_on_appearance(data, effect=False))
 
         def withdraw() -> None:
             for withdraw_target in withdrawals:

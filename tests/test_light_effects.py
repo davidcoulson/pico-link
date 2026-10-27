@@ -289,3 +289,34 @@ async def test_without_favorites_a_raise_tap_still_steps_brightness(hass):
     assert light.calls == [("turn_on", {"brightness_pct": 60})]
 
     await _stop(hass, controller)
+
+
+async def test_raise_while_off_keeps_its_effect_but_takes_the_on_color_temp(hass):
+    light = _FakeLight(hass, on=False)
+    controller = await _controller(
+        hass, light_on_effect="None", light_on_color_temp_kelvin=3000
+    )
+
+    await _tap(hass, "raise")
+
+    assert light.calls == [
+        (
+            "turn_on",
+            {"effect": "Solid", "brightness_pct": 100, "color_temp_kelvin": 3000},
+        )
+    ]
+
+    await _stop(hass, controller)
+
+
+async def test_raise_after_on_steps_from_the_on_effect_not_a_stale_one(hass):
+    light = _FakeLight(hass, on=True, effect=FAVORITES[2])
+    controller = await _controller(hass, light_on_effect=FAVORITES[0])
+
+    await _tap(hass, "raise")
+    await _tap(hass, "on")
+    await _tap(hass, "raise")
+
+    assert light.effects() == [FAVORITES[3], FAVORITES[0], FAVORITES[1]]
+
+    await _stop(hass, controller)
